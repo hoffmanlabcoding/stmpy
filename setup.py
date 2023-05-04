@@ -1,8 +1,8 @@
 from setuptools import setup, find_packages
 
 setup(
-  name = 'getstmpy',
-  version = '0.1.7',
+  name = 'hoffmanstmpy',
+  version = '1.0.0',
   packages = find_packages(),
   package_data = {
     "":["*.txt", "*.mat"]
@@ -11,9 +11,9 @@ setup(
   license='MIT',
   description = 'Scanning tunneling microscopy data analysis suite',
   author = 'Harris Pirie',
-  author_email = 'hpirie@live.com',
-  url = 'https://github.com/harrispirie/stmpy',
-  download_url = 'https://github.com/harrispirie/stmpy/archive/v0.1.tar.gz',
+  author_email = 'hoffmanlabcoding@gmail.com',
+  url = 'https://github.com/hoffmanlabcoding/stmpy',
+  download_url = 'https://github.com/hoffmanlabcoding/stmpy.git',
   keywords = ['STM', 'Python', 'Data Analysis'],
   install_requires=[
           'numpy',
