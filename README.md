@@ -21,7 +21,7 @@ $ python setup.py develop
 For users (in progress)
 
 ```sh
-$ pip install getstmpy
+$ pip install hoffmanstmpy
 ```
 
 
