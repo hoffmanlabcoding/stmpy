@@ -3,10 +3,6 @@ MANIFEST.in
 README.md
 setup.cfg
 setup.py
-getstmpy.egg-info/SOURCES.txt
-getstmpy.egg-info/dependency_links.txt
-getstmpy.egg-info/requires.txt
-getstmpy.egg-info/top_level.txt
 hoffmanstmpy.egg-info/PKG-INFO
 hoffmanstmpy.egg-info/SOURCES.txt
 hoffmanstmpy.egg-info/dependency_links.txt
