@@ -567,11 +567,10 @@ def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp
     if cut1 is not None:
         A = cropedge_new(A, n=cut1)
 
-    # find the Bragg peak before the drift correction 
-    bp1 = findBraggs(A, r=r, w=w, mask3=mask3, show=show, **kwargs)
-    bp1 = sortBraggs(bp1, s=np.shape(A))
-
     if bp_c is None:
+        # find the Bragg peak before the drift correction 
+        bp1 = findBraggs(A, r=r, w=w, mask3=mask3, show=show, **kwargs)
+        bp1 = sortBraggs(bp1, s=np.shape(A))
         # Find the angle between each Bragg peaks
         if bp_angle is None:
             N = len(bp1)
@@ -588,6 +587,8 @@ def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp
                 orient = np.arctan2(*Q[0][::-1])
         # Calculate the correction position of each Bragg peak
         bp_c = generate_bp(A, bp1, angle=bp_angle, orient= orient, even_out=even_out)
+    else:
+        bp1 = bp_c
     
     # Find the phasemap 
     thetax, thetay, Q1, Q2 = phasemap(A, bp=bp_c, method=method, sigma=sigma)
