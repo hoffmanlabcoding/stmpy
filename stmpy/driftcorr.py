@@ -1361,7 +1361,7 @@ def phasemap(A, bp, sigma=10, method="lockin"):
         sx = sigmax
         sy = sigmay
         Amp = 1/(4*np.pi*sx*sy)
-        p0 = [int((s-1)/2), int((s-1)/2), sx, sy, Amp, np.pi/2]
+        p0 = [int((s1-1)/2), int((s2-1)/2), sx, sy, Amp, np.pi/2]
         G = stmpy.tools.gauss2d(t_x, t_y, p=p0, symmetric=True)
         T_x = sp.signal.fftconvolve(A_x, G, mode='same',)
         T_y = sp.signal.fftconvolve(A_y, G, mode='same',)
