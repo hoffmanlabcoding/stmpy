@@ -95,6 +95,7 @@ def load(filePath, biasOffset=True, niceUnits=False):
         2020-07-12  - WT : Added support for sm4 file from rhk system.
         2022-06-22  - HP : Added support for Cornell files: .2FL .1FL .TFR .1FR
         2022-02-15  - HP : Added support for STM1 Cornell .FFL files
+        2023-05-18  - RL : Loads sxm scan files even if missing header.
 
     '''
     try:
@@ -635,7 +636,10 @@ def load_sxm(filePath):
                 values = fileObj.readline().strip().decode('utf-8').split('\t')
                 self.header['z-controller'] = dict(zip(keys, values))
             elif tagname in ('BIAS', 'REC_TEMP', 'ACQ_TIME', 'SCAN_ANGLE'):
-                self.header[tagname.lower()] = float(line)
+                try:
+                    self.header[tagname.lower()] = float(line)
+                except ValueError:
+                    pass
             elif tagname in ('SCAN_PIXELS', 'SCAN_TIME', 'SCAN_RANGE', 'SCAN_OFFSET'):
                 self.header[tagname.lower()] = [ float(i) for i in re.split('\s+', line) ]
             elif 'DATA_INFO' == tagname:
