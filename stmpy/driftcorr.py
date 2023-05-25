@@ -1084,16 +1084,17 @@ def fitGaussian2d(data, p0):
 def mask_bp(A, p):
 
     n, offset, thres, *_ = p
-    s = np.shape(A)[-1]
-    t = np.arange(s)
-    x, y = np.meshgrid(t, t)
-    center = (np.array([s, s])-1) // 2
+    s2, s1 = np.shape(A)[-2:]
+    t1 = np.arange(s1)
+    t2 = np.arange(s2)
+    x, y = np.meshgrid(t1, t2)
+    center = (np.array([s1, s2])-1) // 2
     mask = np.ones_like(x)
     theta = 2 * np.pi / n
     for i in range(n):
         angle = theta * i + offset
         index = np.where(np.absolute(np.cos(angle)*(y-center[1]) - \
-                                     np.sin(angle)*(x-center[0])) < thres)
+                                     np.sin(angle)*(x-center[0]) * s2 / s1) < thres)
         mask[index] = 0
     return mask
 
