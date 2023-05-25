@@ -1959,3 +1959,70 @@ def quick_show_single(A, en, thres=5, fs=4, qscale=None, rspace=False, saveon=Fa
             else:
                 plt.savefig("{} at {} mV.{}".format(imgName, int(
                     en), extension), bbox_inches='tight', pad_inches=0)
+
+
+def quick_plot(A, rspace=True, thres=3, fs=4, qscale=None, qlimit=1.2,  clims=None, cmap=None,
+                      saveon=False, imgName='', extension='png', dpi=400, **kwargs):
+    
+    '''
+    Display 2D real space and FT images with a set of standard settings.
+    
+    Inputs:
+        A           - Required : 2D arrays of real space or FT image to dispaly
+        rspace      - Optional : bool, flag to indicate if A is a real space or FT image
+        thres       - Optional : float, number of sigma to control the color limit
+        fs          - Optional : float, figure size 
+        qscale      - Optional : float, specify the extent for the FT image
+        qlimit      - Optional : float, specify the range to plot for the FT image
+        clims       - Optional : list, specify the color limit for imshow. If not give, clims will be computed based on mean and std of A.
+        saveon      - Optional : bool, flag to control wether or not the image will be saved
+        kwargs      - Optional : key word arguments used in imshow()
+    Returns:
+        No return 
+
+    Usage:
+        import stmpy
+        import stmpy.driftcorr as dfc
+        dfc.quick_plot(d.z)
+        d.z_ft = stmpy.tools.fft(d.z, zeroDC=True)
+        dfc.quick_plot(d.z_ft, rspace=False)
+
+    History:
+        05/25/2023        RL : Initial commit.
+    '''
+    
+    plt.figure(figsize=[fs, fs])
+    c = np.mean(A)
+    s = np.std(A)
+    
+    # compute the color limit if clims is not given
+    if clims == None:
+        if rspace == True:
+            clims = [c-thres*s, c+thres*s]
+        else:
+            clims = [0, c+thres*s]
+    
+    # compute the FT image qscale if qscale is not given
+    if qscale == None:
+        extents = None
+    else:
+        extents = [-qscale, qscale, -qscale, qscale, ]
+        
+    # Use the default color maps if cmap is not set
+    if cmap == None:
+        cmap = stmpy.cm.blue2 if rspace else stmpy.cm.gray_r
+        
+    if rspace == True:
+        plt.imshow(A, clim=[c-thres*s, c+thres*s], cmap=cmap, **kwargs)
+        plt.gca().set_aspect(1)
+    else:
+        plt.imshow(A, extent=extents, clim=[0, c+thres*s], cmap=cmap, **kwargs)
+    plt.gca().axes.get_xaxis().set_visible(False)
+    plt.gca().axes.get_yaxis().set_visible(False)
+    plt.gca().set_frame_on(False)
+    
+    if saveon == True:
+        if extension == 'png':
+            plt.savefig("{}.{}".format(imgName, extension), dpi=dpi, bbox_inches='tight', pad_inches=0)
+        else:
+            plt.savefig("{}.{}".format(imgName, extension), bbox_inches='tight', pad_inches=0)
