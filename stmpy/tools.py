@@ -511,7 +511,7 @@ def GMKhexagon(br, s, ec='k', lw=1):
                                   closed=True, fill=None, ec=ec, lw=lw)
     return G, M, K, hexagon
 
-def symmetrize(data, n, bp=(1.,1.), diag=False):
+def symmetrize(data, n, bp=(1.,1.), mirrorOnly=False, diag=False):
     '''
     Applies n-fold symmetrization to the image by rotating clockwise and
     anticlockwise by an angle 2pi/n, then applying a mirror line.  Works on 2D
@@ -525,6 +525,8 @@ def symmetrize(data, n, bp=(1.,1.), diag=False):
                              mirror line.
         diag    - Optional : Boolean to assert whether the mirror line is left
                              on the diagonal.
+        mirrorOnly - Optional : Boolean, if True only mirror symmetry along bp 
+                             direction is used
 
     Returns:
         dataSymm - A 2D or 3D numpy array containing symmetrized data.
@@ -534,6 +536,7 @@ def symmetrize(data, n, bp=(1.,1.), diag=False):
         2017-06-05  - HP : Modified default bp-value to be on diagonal.
         2017-08-15  - HP : Added flag to leave mirror line on the diagonal.
                            Code will not line mirror unsquare data.
+        2023-05-25  - RL : Add support for mirror only symmetrize 
      '''
     def sym2d(F, n):
         angle = 360.0/n
@@ -562,11 +565,17 @@ def symmetrize(data, n, bp=(1.,1.), diag=False):
             return F
     p = np.array(bp, dtype=np.float64)
     if len(data.shape) is 2:
+        if mirrorOnly == False:
             return linmirr(sym2d(data, n), p[0], p[1])
+        else:
+            return linmirr(data, p[0], p[1])
     if len(data.shape) is 3:
         out = np.zeros_like(data)
         for ix, layer in enumerate(data):
-            out[ix] = linmirr(sym2d(layer, n), p[0], p[1])
+            if mirrorOnly == False:
+                out[ix] = linmirr(sym2d(layer, n), p[0], p[1])
+            else:
+                out[ix] = linmirr(layer, p[0], p[1])
         return out
     else:
         print('ERR: Input must be 2D or 3D numpy array.')
