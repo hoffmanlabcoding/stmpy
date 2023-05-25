@@ -24,7 +24,12 @@ For users (in progress)
 $ pip install hoffmanstmpy
 ```
 
-
+### Usage
+In the stmpy-doc folder, there are three tutorial notebooks and one coding template.
+1. **Stmpy 101 - getting started.ipynb**: basic usage of stmpy to analyze topography maps and DOS maps
+2. **Stmpy 102 - dfc tutorial.ipynb**: drift correction tutorial, including theory behind drift correction and usage of this module
+3. **piezo calibration.ipynb**: describe how to calibrate your piezo with two topos
+4. **stmpy notebook template -- topos and dos maps.ipynb**: template notebook that has example codes for different usage of stmpy (kinda of serving as table of content for this library), including loop through all the topos in a folder, drift correct and take linecuts on a DOS map, still growing...
 
 License
 ----
