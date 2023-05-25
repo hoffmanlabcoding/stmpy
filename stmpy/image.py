@@ -110,7 +110,7 @@ def write_animation(data, fileName, saturation=2, clims=(0,1), cmap=None,
     if saturation is not None:
         saturate(saturation, im=im)
     else:
-        if len(np.shape(clims)) > 2:
+        if len(np.shape(clims)) > 1:
             plt.clim(clims[0])
         else:
             plt.clim(clims)
@@ -128,7 +128,7 @@ def write_animation(data, fileName, saturation=2, clims=(0,1), cmap=None,
         if saturation is not None:
             saturate(saturation, im=im)
         else:
-            if len(np.shape(clims)) > 2:
+            if len(np.shape(clims)) > 1:
                 plt.clim(clims[i])
             else:
                 plt.clim(clims)
