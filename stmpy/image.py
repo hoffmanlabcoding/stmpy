@@ -93,6 +93,7 @@ def write_animation(data, fileName, saturation=2, clims=(0,1), cmap=None,
         2017-06-08  -   HP  : Added **kwargs sent to imshow
         2017-06-23  -   HP  : Added support for MP4 export and made codec
                               choice automatic.
+        2023-05-25  -   RL  : Added support for different color limit for different layers
     '''
     boxProperties = dict(boxstyle='square', facecolor='w', alpha=0.8, linewidth=0.0)
     textOptions = dict(fontsize=14, color='k', bbox=boxProperties, ha='right', va='center')
@@ -109,7 +110,10 @@ def write_animation(data, fileName, saturation=2, clims=(0,1), cmap=None,
     if saturation is not None:
         saturate(saturation, im=im)
     else:
-        plt.clim(clims)
+        if len(np.shape(clims)) > 2:
+            plt.clim(clims[0])
+        else:
+            plt.clim(clims)
 
     if label is not None:
         tx = ax.text(0.95,0.95,'{:2.1f} {:}'.format(label[0], label_caption),
@@ -124,7 +128,10 @@ def write_animation(data, fileName, saturation=2, clims=(0,1), cmap=None,
         if saturation is not None:
             saturate(saturation, im=im)
         else:
-            plt.clim(clims)
+            if len(np.shape(clims)) > 2:
+                plt.clim(clims[i])
+            else:
+                plt.clim(clims)
         if label is not None:
             tx.set_text('{:2.1f} {:}'.format(label[i], label_caption))
         return [im]
