@@ -1897,7 +1897,8 @@ def quick_show_cut(A, en, qscale, thres=5, thres2=None, saveon=False, qlimit=1.2
 # Quick show single images
 
 
-def quick_show_single(A, en, thres=5, fs=4, qscale=None, rspace=False, saveon=False, qlimit=1.2, imgName='', extension='png', dpi=400):
+def quick_show_single(A, en, thres=5, fs=4, qscale=None, rspace=False, saveon=False, 
+                        qlimit=1.2, imgName='', extension='png', dpi=400):
     layers = len(A)
     if rspace is False:
         if qscale is None:
@@ -1962,7 +1963,7 @@ def quick_show_single(A, en, thres=5, fs=4, qscale=None, rspace=False, saveon=Fa
 
 
 def quick_plot(A, rspace=True, thres=3, fs=4, qscale=None, qlimit=1.2,  clims=None, cmap=None,
-                      saveon=False, imgName='', extension='png', dpi=400, **kwargs):
+                      saveon=False, imgName=None, extension='png', dpi=400, **kwargs):
     
     '''
     Display 2D real space and FT images with a set of standard settings.
@@ -1975,7 +1976,7 @@ def quick_plot(A, rspace=True, thres=3, fs=4, qscale=None, qlimit=1.2,  clims=No
         qscale      - Optional : float, specify the extent for the FT image
         qlimit      - Optional : float, specify the range to plot for the FT image
         clims       - Optional : list, specify the color limit for imshow. If not give, clims will be computed based on mean and std of A.
-        saveon      - Optional : bool, flag to control wether or not the image will be saved
+        imgName     - Optional : String, default None. If not None image will be saved with the name imgName
         kwargs      - Optional : key word arguments used in imshow()
     Returns:
         No return 
@@ -2021,7 +2022,7 @@ def quick_plot(A, rspace=True, thres=3, fs=4, qscale=None, qlimit=1.2,  clims=No
     plt.gca().axes.get_yaxis().set_visible(False)
     plt.gca().set_frame_on(False)
     
-    if saveon == True:
+    if imgName != None:
         if extension == 'png':
             plt.savefig("{}.{}".format(imgName, extension), dpi=dpi, bbox_inches='tight', pad_inches=0)
         else:
