@@ -1732,15 +1732,15 @@ def __even_bp(bp, s):
 #15. - display
 
 
-def display(*args, sigma=3, clim_same=True,):
+def display(*args, sigma=3, layout='portrait', clim_same=True):
     '''
     Display or compare images in both real space and q-space.
 
     Inputs:
         *args       - Required : Any number of real space images to display.
         sigma       - Optional : sigma for the color limit.
-        clim_same   - Optional : If True, then the FT of the images will be displayed under the
-                                    same color limit (determined by the first image).
+        layout      - Optional : Layout for displaying images, either 'portrait' or 'landscape'.
+        clim_same   - Optional : If True, then all FT will be displayed under the same color limit.
 
     Returns:
         N/A
@@ -1750,30 +1750,48 @@ def display(*args, sigma=3, clim_same=True,):
         dfc.display(topo.z)
     '''
     fft_images = [stmpy.tools.fft(A, zeroDC=True) for A in args]
+    
     if clim_same:
-        clim_values = [(np.mean(A_fft), np.std(A_fft)) for A_fft in fft_images]
-        global_clim = (np.mean([c for c, _ in clim_values]), np.std([s for _, s in clim_values]))
+        first_image_fft = fft_images[0]
+        global_clim = (np.mean(first_image_fft), np.std(first_image_fft))
 
-    # Define the subplot grid
-    fig, ax = plt.subplots(len(args), 2, figsize=[8, 4*len(args)])
+    if layout == 'portrait':
+        fig, ax = plt.subplots(len(args), 2, figsize=[8, 4*len(args)])
 
-    for i, A in enumerate(args):
-        A_fft = stmpy.tools.fft(A, zeroDC=True)
-        c, s = global_clim if clim_same else (np.mean(A_fft), np.std(A_fft))
-        
-        # Adjust for multiple or single subplots
-        if len(args) > 1:
-            ax[i, 0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
-            ax[i, 1].imshow(A_fft, cmap=stmpy.cm.gray_r,
-                            origin='lower', clim=[0, c+sigma*s])
-            ax[i, 0].set_aspect(1)
-            ax[i, 1].set_aspect(1)
-        else:
-            ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
-            ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r,
-                        origin='lower', clim=[0, c+sigma*s])
-            ax[0].set_aspect(1)
-            ax[1].set_aspect(1)
+        for i, A in enumerate(args):
+            A_fft = fft_images[i]
+            c, s = global_clim if clim_same else (np.mean(A_fft), np.std(A_fft))
+
+            if len(args) > 1:
+                ax[i, 0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+                ax[i, 1].imshow(A_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c+sigma*s])
+                ax[i, 0].set_aspect(1)
+                ax[i, 1].set_aspect(1)
+            else:
+                ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+                ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c+sigma*s])
+                ax[0].set_aspect(1)
+                ax[1].set_aspect(1)
+
+    elif layout == 'landscape':
+        fig, ax = plt.subplots(2, len(args), figsize=[8*len(args), 4*len(args)])
+
+        for i, A in enumerate(args):
+            A_fft = fft_images[i]
+            c, s = global_clim if clim_same else (np.mean(A_fft), np.std(A_fft))
+
+            if len(args) > 1:
+                ax[0, i].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+                ax[1, i].imshow(A_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c+sigma*s])
+                ax[0, i].set_aspect(1)
+                ax[1, i].set_aspect(1)
+            else:
+                ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+                ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c+sigma*s])
+                ax[0].set_aspect(1)
+                ax[1].set_aspect(1)
+    else:
+        raise ValueError('Invalid layout type. Choose either "portrait" or "landscape".')
 
 def quick_linecut(A, width=2, n=4, bp=None, ax=None, thres=3):
     """
