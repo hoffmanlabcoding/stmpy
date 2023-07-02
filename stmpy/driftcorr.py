@@ -1732,16 +1732,15 @@ def __even_bp(bp, s):
 #15. - display
 
 
-def display(A, B=None, sigma=3, clim_same=True):
+def display(*args, sigma=3, clim_same=True,):
     '''
     Display or compare images in both real space and q-space.
 
     Inputs:
-        A           - Required : Real space image to display.
-        B           - Optional : Another real space image to be compared with A.
+        *args       - Required : Any number of real space images to display.
         sigma       - Optional : sigma for the color limit.
-        clim_same   - Optional : If True, then both FT of A and B will be displayed under the
-                                    same color limit (determined by A).
+        clim_same   - Optional : If True, then the FT of the images will be displayed under the
+                                    same color limit (determined by the first image).
 
     Returns:
         N/A
@@ -1749,38 +1748,32 @@ def display(A, B=None, sigma=3, clim_same=True):
     Usage:
         import stmpy.driftcorr as dfc
         dfc.display(topo.z)
-
     '''
-    if B is None:
+    fft_images = [stmpy.tools.fft(A, zeroDC=True) for A in args]
+    if clim_same:
+        clim_values = [(np.mean(A_fft), np.std(A_fft)) for A_fft in fft_images]
+        global_clim = (np.mean([c for c, _ in clim_values]), np.std([s for _, s in clim_values]))
+
+    # Define the subplot grid
+    fig, ax = plt.subplots(len(args), 2, figsize=[8, 4*len(args)])
+
+    for i, A in enumerate(args):
         A_fft = stmpy.tools.fft(A, zeroDC=True)
-        c = np.mean(A_fft)
-        s = np.std(A_fft)
-        fig, ax = plt.subplots(1, 2, figsize=[8, 4])
-        ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
-        ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r,
-                     origin='lower', clim=[0, c+sigma*s])
-        for ix in ax:
-            ix.set_aspect(1)
-    else:
-        A_fft = stmpy.tools.fft(A, zeroDC=True)
-        B_fft = stmpy.tools.fft(B, zeroDC=True)
-        c1 = np.mean(A_fft)
-        s1 = np.std(A_fft)
-        if clim_same is True:
-            c2 = c1
-            s2 = s1
+        c, s = global_clim if clim_same else (np.mean(A_fft), np.std(A_fft))
+        
+        # Adjust for multiple or single subplots
+        if len(args) > 1:
+            ax[i, 0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+            ax[i, 1].imshow(A_fft, cmap=stmpy.cm.gray_r,
+                            origin='lower', clim=[0, c+sigma*s])
+            ax[i, 0].set_aspect(1)
+            ax[i, 1].set_aspect(1)
         else:
-            c2 = np.mean(B_fft)
-            s2 = np.std(B_fft)
-        fig, ax = plt.subplots(2, 2, figsize=[8, 8])
-        ax[0, 0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
-        ax[0, 1].imshow(A_fft, cmap=stmpy.cm.gray_r,
-                        origin='lower', clim=[0, c1+sigma*s1])
-        ax[1, 0].imshow(B, cmap=stmpy.cm.blue2, origin='lower')
-        ax[1, 1].imshow(B_fft, cmap=stmpy.cm.gray_r,
-                        origin='lower', clim=[0, c2+sigma*s2])
-        for ix in ax.flatten():
-            ix.set_aspect(1)
+            ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+            ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r,
+                        origin='lower', clim=[0, c+sigma*s])
+            ax[0].set_aspect(1)
+            ax[1].set_aspect(1)
 
 def quick_linecut(A, width=2, n=4, bp=None, ax=None, thres=3):
     """
