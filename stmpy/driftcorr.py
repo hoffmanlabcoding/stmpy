@@ -2008,10 +2008,10 @@ def quick_plot(A, rspace=True, thres=3, fs=4, qscale=None, qlimit=1.2,  clims=No
         cmap = stmpy.cm.blue2 if rspace else stmpy.cm.gray_r
         
     if rspace == True:
-        plt.imshow(A, clim=[c-thres*s, c+thres*s], cmap=cmap, **kwargs)
+        plt.imshow(A, clim=clims, cmap=cmap, **kwargs)
         plt.gca().set_aspect(1)
     else:
-        plt.imshow(A, extent=extents, clim=[0, c+thres*s], cmap=cmap, **kwargs)
+        plt.imshow(A, extent=extents, clim=clims, cmap=cmap, **kwargs)
     plt.gca().axes.get_xaxis().set_visible(False)
     plt.gca().axes.get_yaxis().set_visible(False)
     plt.gca().set_frame_on(False)
