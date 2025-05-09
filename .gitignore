@@ -13,3 +13,7 @@
 
 stmpy/.tools.py.swo
 stmpy/doc/Stmpy 101 - getting started.ipynb
+
+stmpy/doc/.ipynb_checkpoints
+
+.vscode

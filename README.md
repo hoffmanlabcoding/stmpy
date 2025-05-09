@@ -15,8 +15,9 @@ For developers
 1. **Clone** or **download** `stmpy` to your local drive.
 2. Navigate to within local copy of stmpy.
 ```sh
-$ python setup.py develop
+$ python -m pip install --editable .
 ```
+- *[deprecated](https://packaging.python.org/en/latest/discussions/setup-py-deprecated/):* ~~`python setup.py develop`~~
 
 For users (in progress)
 
