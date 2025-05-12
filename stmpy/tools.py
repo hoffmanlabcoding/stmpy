@@ -61,9 +61,9 @@ def interp2d(x, y, z, kind='nearest', **kwargs):
         #return scinterp2d(x, y, z, kind=kind, **kwargs)
         from scipy.interpolate import RectBivariateSpline
         if(kind == 'cubic'):
-            return RectBivariateSpline(t1, t2, A.T, kx=3, ky=3) # cubic kx=ky=3
+            return RectBivariateSpline(x, y, z.T, kx=3, ky=3) # cubic kx=ky=3
         if(kind == 'linear'):
-            return RectBivariateSpline(t1, t2, A.T, kx=1, ky=1) # linear kx=ky=1
+            return RectBivariateSpline(x, y, z.T, kx=1, ky=1) # linear kx=ky=1
         else:
             raise ValueError(f"invalid interpolation given: {kind}")
         
