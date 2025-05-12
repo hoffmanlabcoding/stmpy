@@ -57,9 +57,14 @@ def interp2d(x, y, z, kind='nearest', **kwargs):
             return values.reshape(lx, ly)
         return fCall
     else:
-        from scipy.interpolate import interp2d as scinterp2d
-        return scinterp2d(x, y, z, kind=kind, **kwargs)
-
+        from scipy.interpolate import RectBivariateSpline
+        if(kind == 'cubic'):
+            return RectBivariateSpline(x, y, z.T, kx=3, ky=3) # cubic kx=ky=3
+        if(kind == 'linear'):
+            return RectBivariateSpline(x, y, z.T, kx=1, ky=1) # linear kx=ky=1
+        else:
+            raise ValueError(f"unsupported interpolation given: {kind}")
+        
 
 def azimuthalAverage(F, x0, y0, r, theta=np.linspace(0,2*np.pi,500),
         kind='linear'):

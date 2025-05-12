@@ -10,7 +10,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import scipy.optimize as opt
 import scipy.ndimage as snd
-from scipy.interpolate import interp1d, interp2d
+from scipy.interpolate import interp1d, RectBivariateSpline
 from skimage import transform as tf
 from skimage.feature import peak_local_max
 from pprint import pprint
@@ -1177,14 +1177,14 @@ def cropedge_new(A, n, bp=None, c1=2, c2=2,
         t1 = np.arange(L1)
         t2 = np.arange(L2)
         if len(np.shape(A)) == 2:
-            f = interp2d(t1, t2, B, kind='cubic')
+            f = RectBivariateSpline(t1, t2, B.T, kx=3, ky=3) # transposed vs interp2d, and defining cubic w/ kx=ky=3
             t_new1 = np.linspace(0, L_new1, num=L1+1)
             t_new2 = np.linspace(0, L_new2, num=L2+1)
             z_new = f(t_new1[:-1], t_new2[:-1])
         elif len(np.shape(A)) == 3:
             z_new = np.zeros([np.shape(A)[0], L2, L1])
             for i in range(len(A)):
-                f = interp2d(t1, t2, B[i], kind='cubic')
+                f = RectBivariateSpline(t1, t2, B[i].T, kx=3, ky=3)
                 t_new1 = np.linspace(0, L_new1, num=L1+1)
                 t_new2 = np.linspace(0, L_new2, num=L2+1)
                 z_new[i] = f(t_new1[:-1], t_new2[:-1])
@@ -1273,7 +1273,7 @@ def __cropedge(A, n, bp=None, c1=2, c2=2, a1=None, a2=None, force_commen=False):
         t1 = np.arange(L1)
         t2 = np.arange(L2)
         if len(np.shape(A)) == 2:
-            f = interp2d(t1, t2, B, kind='cubic')
+            f = RectBivariateSpline(t1, t2, B.T, kx=3, ky=3)
             t_new1 = np.linspace(delta1, L_new1+delta1, num=L1-offset+1)
             t_new2 = np.linspace(delta2, L_new2+delta2, num=L2-offset+1)
             #t_new1 = np.linspace(0, L_new1, num=L1-offset+1)
@@ -1282,7 +1282,7 @@ def __cropedge(A, n, bp=None, c1=2, c2=2, a1=None, a2=None, force_commen=False):
         elif len(np.shape(A)) == 3:
             z_new = np.zeros([np.shape(A)[0], L2-offset, L1-offset])
             for i in range(len(A)):
-                f = interp2d(t1, t2, B[i], kind='cubic')
+                f = RectBivariateSpline(t1, t2, B[i].T, kx=3, ky=3)
                 t_new1 = np.linspace(delta1, L_new1+delta1, num=L1-offset+1)
                 t_new2 = np.linspace(delta2, L_new2+delta2, num=L2-offset+1)
                 z_new[i] = f(t_new1[:-1], t_new2[:-1])
@@ -1516,6 +1516,7 @@ def driftcorr(A, ux=None, uy=None, method="lockin", interpolation='cubic'):
                                                     (x-ux, y-uy)
                                     "convolution": Used inversion fft to apply the drift fields
         interpolation - Optional : Specifying which method to use for interpolating
+                                    (originally followed interp2d, now translating into kx and ky for RectBilinear)
 
     Returns:
         A_corr      - 2D or 3D array of topo with drift corrected
@@ -1539,14 +1540,26 @@ def driftcorr(A, ux=None, uy=None, method="lockin", interpolation='cubic'):
         ynew = (y - uy).ravel()
         tmp = np.zeros(s1*s2)
         if len(A.shape) is 2:
-            tmp_f = interp2d(t1, t2, A, kind=interpolation)
+            if(interpolation == 'cubic'):
+                tmp_f = RectBivariateSpline(t1, t2, A.T, kx=3, ky=3) # cubic kx=ky=3
+            elif(interpolation == 'linear'):
+                tmp_f = RectBivariateSpline(t1, t2, A.T, kx=1, ky=1) # linear kx=ky=1
+            else:
+                raise ValueError(f"unsupported interpolation given: {interpolation}")
+            
             for ix in range(tmp.size):
                 tmp[ix] = tmp_f(xnew[ix], ynew[ix])
             A_corr = tmp.reshape(s2, s1)
             return A_corr
         elif len(A.shape) is 3:
             for iz, layer in enumerate(A):
-                tmp_f = interp2d(t1, t2, layer, kind=interpolation)
+                if(interpolation == 'cubic'):
+                    tmp_f = RectBivariateSpline(t1, t2, layer.T, kx=3, ky=3) # cubic kx=ky=3
+                elif(interpolation == 'linear'):
+                    tmp_f = RectBivariateSpline(t1, t2, layer.T, kx=1, ky=1) # linear kx=ky=1
+                else:
+                    raise ValueError(f"unsupported interpolation: {interpolation}")
+                
                 for ix in range(tmp.size):
                     tmp[ix] = tmp_f(xnew[ix], ynew[ix])
                 A_corr[iz] = tmp.reshape(s2, s1)
