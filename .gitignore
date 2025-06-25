@@ -17,3 +17,7 @@ stmpy/doc/Stmpy 101 - getting started.ipynb
 stmpy/doc/.ipynb_checkpoints
 
 .vscode
+.DS_Store
+stmpy/.DS_Store
+stmpy/doc/.DS_Store
+stmpy/doc/.DS_Store

@@ -1,17 +1,30 @@
-Metadata-Version: 1.1
+Metadata-Version: 2.2
 Name: hoffmanstmpy
 Version: 1.0.1
 Summary: Scanning tunneling microscopy data analysis suite
 Home-page: https://github.com/hoffmanlabcoding/stmpy
+Download-URL: https://github.com/hoffmanlabcoding/stmpy.git
 Author: Harris Pirie
 Author-email: hoffmanlabcoding@gmail.com
 License: MIT
-Download-URL: https://github.com/hoffmanlabcoding/stmpy.git
-Description: UNKNOWN
 Keywords: STM,Python,Data Analysis
-Platform: UNKNOWN
 Classifier: Development Status :: 3 - Alpha
 Classifier: Intended Audience :: Developers
 Classifier: Topic :: Software Development :: Build Tools
 Classifier: License :: OSI Approved :: MIT License
 Classifier: Programming Language :: Python :: 3
+License-File: LICENSE.txt
+Requires-Dist: numpy
+Requires-Dist: scipy
+Requires-Dist: matplotlib
+Requires-Dist: opencv-python
+Requires-Dist: scikit-image
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: download-url
+Dynamic: home-page
+Dynamic: keywords
+Dynamic: license
+Dynamic: requires-dist
+Dynamic: summary
