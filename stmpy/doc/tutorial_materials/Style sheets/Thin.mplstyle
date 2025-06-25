@@ -1,0 +1,56 @@
+
+font.weight : 400
+font.sans-serif : Gill Sans
+
+axes.titlesize : 18
+axes.labelsize : 14
+axes.linewidth : 0.6
+axes.facecolor : white
+axes.edgecolor : black
+axes.labelcolor : black
+#axes.prop_cycle : cycler('color', ['1F1D64','ca0222','d56610', '006d2c','810f7c', '80b1d3'])
+
+axes.prop_cycle : cycler('color', ['084081','0868ac','2b8cbe','4eb3d3','7bccc4','a8ddb5','ccebc5','e0f3db'])
+
+lines.linewidth : 1.7 
+lines.markersize : 5
+lines.markeredgewidth : 0.3
+lines.marker : None
+lines.color : 24226f
+
+xtick.labelsize : 13
+xtick.major.width : 0.4
+xtick.minor.width : 0.4
+xtick.major.size : 6
+xtick.minor.size : 3
+xtick.direction : in
+
+ytick.labelsize : 13
+ytick.major.width : 0.4
+ytick.minor.width : 0.4
+ytick.major.size : 6
+ytick.minor.size : 3
+
+legend.fancybox : False
+legend.numpoints : 1
+legend.fontsize : 10
+legend.handlelength : 1.2
+legend.borderpad : 0.5
+legend.markerscale : 1.0
+legend.framealpha : 0.9
+legend.frameon : False
+legend.labelspacing : 0.35
+
+figure.figsize: 4, 4
+figure.dpi : 100
+figure.facecolor : white
+figure.edgecolor : white
+
+image.aspect : auto
+image.cmap : bone_r
+
+savefig.dpi : 100
+savefig.transparent : True
+
+mathtext.fontset : cm
+

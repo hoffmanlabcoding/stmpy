@@ -1,0 +1,69 @@
+
+#font.weight : 400
+font.sans-serif : Helvetica
+font.weight : regular
+
+axes.titlesize : 6.5
+axes.labelsize : 6.5
+axes.labelpad : 1.5
+axes.linewidth : 0.5
+axes.facecolor : white
+axes.edgecolor : black
+axes.labelcolor : black
+axes.prop_cycle : cycler('color', ['1F1D64','ca0222','d56610', '006d2c','810f7c', '80b1d3'])
+
+#axes.prop_cycle : cycler('color', ['084081','0868ac','2b8cbe','4eb3d3','7bccc4','a8ddb5','ccebc5','e0f3db'])
+
+lines.linewidth : 0.7
+lines.markersize : 2.5
+lines.markeredgewidth : 0.5
+lines.marker : None
+lines.color : black
+
+xtick.labelsize : 6.5
+xtick.major.width : 0.5
+xtick.minor.width : 0.5
+xtick.major.pad : 1
+xtick.minor.pad : 1
+xtick.major.size : 2
+xtick.minor.size : 0.5
+xtick.direction : out
+xtick.color : black
+
+ytick.labelsize : 6.5
+ytick.major.width : 0.5
+ytick.minor.width : 0.5
+ytick.major.pad : 1
+ytick.minor.pad : 1
+ytick.major.size : 2
+ytick.minor.size : 1
+ytick.direction : out
+ytick.color : black
+
+legend.fancybox : False
+legend.numpoints : 1
+legend.fontsize : 6.5
+legend.handlelength : 1
+legend.borderpad : 0.5
+legend.markerscale : 1.0
+legend.framealpha : 0.98
+legend.frameon : False
+legend.labelspacing : 0.35
+
+figure.figsize: 2.25, 1.5
+figure.dpi : 200
+figure.facecolor : white
+figure.edgecolor : white
+
+image.aspect : auto
+image.cmap : bone_r
+image.origin : lower
+image.interpolation : none
+#image.rasterized : True # Not sure how to set this by default...
+
+savefig.dpi : 200
+savefig.transparent : True
+
+svg.image_inline : True
+
+mathtext.fontset : cm
