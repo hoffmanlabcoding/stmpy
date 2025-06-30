@@ -181,7 +181,9 @@ def __findBraggs(A, rspace=True, min_dist=5, thres=0.25, r=None,
         return findBraggs(A, rspace=rspace, min_dist=min_dist, thres=thres, r=r,
                             w=w, mask3=mask3, precise=precise, width=width, p0=p0, even_out=even_out, show=show)
 
-    else:
+    else: # if we do have an object, we will use its bp_parameters
+        
+        # If want to update its bp_parameters
         if update_obj is not False:
             obj.bp_parameters = {
                 'rspace': rspace,
@@ -227,8 +229,10 @@ def global_corr(A, bp=None, show=False, angle=np.pi/4, obj=None, update_obj=Fals
     else:
         if bp is None:
             bp = __findBraggs(A, obj=obj)
+            
         matrix, A_gcorr = __global_corr(
             A, bp=bp, show=show, angle=angle, **kwargs)
+        
         if update_obj is not False:
             # obj.matrix.append(matrix)
             # obj.matrix = matrix
@@ -525,7 +529,7 @@ def gshearcorr(A, bp=None, rspace=True, pts1=None, pts2=None, angle=np.pi/4, ori
 ######################### Wrapped functions for easy use #########################
 ##################################################################################      
         
-def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp_angle=None, orient=None, bp_c=None,\
+def b(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp_angle=None, orient=None, bp_c=None,\
                 sigma=10, method='lockin', even_out=False, show=True, **kwargs):
     '''
     This method find drift parameters from a 2D map automatically.
@@ -714,7 +718,7 @@ def get_para(A, a0=None, size=None, angle=np.pi/2, orient=np.pi/4,
 
     Usage:
         import stmpy.driftcorr as dfc
-        dfc.getAttrs(topo, a0=a0)
+        dfc.get_para(topo, a0=a0)
     '''
     if size is None:
         try:
