@@ -370,7 +370,10 @@ def fitGaussian2d(data, p0):
 
 
 def findOtherBraggPeaks(FT, bpx, bpy, n = 1):
-    '''Once one bragg peak is found this retruns n other bragg peak harmonics by symmetry of the Fourier transform.'''
+    '''Once one bragg peak is found this retruns n other bragg peak harmonics by symmetry of the Fourier transform.
+    
+    
+    '''
     N  = range(-n,0)+range(1,n+1)
     Bpx = [];  Bpy = []
     cenX = FT.shape[1]/2.0;  cenY = FT.shape[0]/2.0
