@@ -370,7 +370,10 @@ def fitGaussian2d(data, p0):
 
 
 def findOtherBraggPeaks(FT, bpx, bpy, n = 1):
-    '''Once one bragg peak is found this retruns n other bragg peak harmonics by symmetry of the Fourier transform.'''
+    '''Once one bragg peak is found this retruns n other bragg peak harmonics by symmetry of the Fourier transform.
+    
+    
+    '''
     N  = range(-n,0)+range(1,n+1)
     Bpx = [];  Bpy = []
     cenX = FT.shape[1]/2.0;  cenY = FT.shape[0]/2.0
@@ -2580,4 +2583,295 @@ def fourier_filter(data, freq, sigma, method='disk', envelope=False):
     return out 
 
 
+# =============================================================================
+# 6. DISPLAY AND PLOTTING UTILITIES
+# =============================================================================
+
+def display(*args, sigma=3, clim_same=True):
+    '''
+    Display or compare images in both real space and q-space.
+
+    Inputs:
+        *args       - Required : Any number of real space images to display.
+        sigma       - Optional : sigma for the color limit.
+        clim_same   - Optional : If True, then the FT of the images will be displayed under the
+                                    same color limit (determined by the first image).
+
+    Returns:
+        N/A
+
+    Usage:
+        import stmpy.driftcorr as dfc
+        dfc.display(topo.z)
+    '''
+    fft_images = [stmpy.tools.fft(A, zeroDC=True) for A in args]
+    if clim_same:
+        c, s = np.mean(fft_images[0]), np.std(fft_images[0])
+        global_clim = (c, s)
+
+    # Define the subplot grid
+    fig, ax = plt.subplots(len(args), 2, figsize=[8, 4*len(args)])
+
+    for i, A in enumerate(args):
+        A_fft = stmpy.tools.fft(A, zeroDC=True)
+        c, s = global_clim if clim_same else (np.mean(A_fft), np.std(A_fft))
+        
+        # Adjust for multiple or single subplots
+        if len(args) > 1:
+            ax[i, 0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+            ax[i, 1].imshow(A_fft, cmap=stmpy.cm.gray_r,
+                            origin='lower', clim=[0, c+sigma*s])
+            ax[i, 0].set_aspect(1)
+            ax[i, 1].set_aspect(1)
+        else:
+            ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+            ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r,
+                        origin='lower', clim=[0, c+sigma*s])
+            ax[0].set_aspect(1)
+            ax[1].set_aspect(1)
+
+
+def quick_linecut(A, width=2, n=4, bp=None, ax=None, thres=3):
+    """
+    Take four linecuts automatically, horizontal, vertical, and two diagonal.
+    Inputs:
+        A           - Required : FT space image to take linecuts.
+        width       - Optional : Number of pixels for averaging.
+        bp          - Optional : Bragg peaks
+        thres       - Optional : threshold for displaying FT
+
+    Returns:
+        N/A
+
+    Usage:
+        import stmpy.driftcorr as dfc
+        r, cut = dfc.quick_linecut(A)
+
+    """
+    Y = np.shape(A)[-2] / 2
+    X = np.shape(A)[-1] / 2
+    r = []
+    cut = []
+    start = [[0, Y], [X, 0], [0, 0], [0, Y*2]]
+    end = [[X*2, Y], [X, Y*2], [X*2, Y*2], [X*2, 0]]
+    color = ['r', 'g', 'b', 'k']
+
+    plt.figure(figsize=[4, 4])
+    if len(np.shape(A)) == 3:
+        if bp is None:
+            bp_x = np.min(findBraggs(np.mean(A, axis=0), rspace=False))
+        else:
+            bp_x = bp
+        cm = np.mean(np.mean(A, axis=0))
+        cs = np.std(np.mean(A, axis=0))
+        plt.imshow(np.mean(A, axis=0), clim=[0, cm+thres*cs])
+    elif len(np.shape(A)) == 2:
+        if bp is None:
+            bp_x = np.min(findBraggs(A, rspace=False))
+        else:
+            bp_x = bp
+        cm = np.mean(A)
+        cs = np.std(A)
+        plt.imshow(A, clim=[0, cm+thres*cs])
+
+    qscale = X*2 / (X*2 - bp_x * 2)
+
+    for i in range(n):
+        r1, cut1 = stmpy.tools.linecut(A, start[i], end[i],
+                                       width=width, show=True, ax=plt.gca(), color=color[i])
+        r.append(r1)
+        cut.append(cut1)
+    plt.gca().set_xlim(-1, X*2+1)
+    plt.gca().set_ylim(-1, Y*2+1)
+    return qscale, cut
+
+
+def quick_show(A, en, thres=5, rspace=True, saveon=False, qlimit=1.2, imgName='', extension='png'):
+    layers = len(A)
+    if rspace is False:
+        imgsize = np.shape(A)[-1]
+        bp_x = np.min(findBraggs(np.mean(A, axis=0),
+                                 min_dist=int(imgsize/10), rspace=rspace))
+        ext = imgsize / (imgsize - 2*bp_x)
+    if layers > 12:
+        skip = layers // 12
+    else:
+        skip = 1
+    fig, ax = plt.subplots(3, 4, figsize=[16, 12])
+    try:
+        for i in range(12):
+            c = np.mean(A[i*skip])
+            s = np.std(A[i*skip])
+            if rspace is True:
+                ax[i//4, i % 4].imshow(A[i*skip], clim=[c -
+                                                        thres*s, c+thres*s], cmap=stmpy.cm.jackyPSD)
+            else:
+                ax[i//4, i % 4].imshow(A[i*skip], extent=[-ext, ext, -ext, ext, ],
+                                       clim=[0, c+thres*s], cmap=stmpy.cm.gray_r)
+                ax[i//4, i % 4].set_xlim(-qlimit, qlimit)
+                ax[i//4, i % 4].set_ylim(-qlimit, qlimit)
+            stmpy.image.add_label("${}$ mV".format(
+                int(en[i*skip])), ax=ax[i//4, i % 4])
+    except IndexError:
+        pass
+    if saveon is True:
+        plt.savefig("{}.{}".format(imgName, extension), bbox_inches='tight')
+
+
+def quick_show_cut(A, en, qscale, thres=5, thres2=None, saveon=False, qlimit=1.2, imgName='', extension="png"):
+    fname = ["M-0", "M-90", "X-45", "X-135"]
+    X1, Y1 = np.shape(A[0])
+    X2, Y2 = np.shape(A[-1])
+    q1 = np.linspace(-qscale, qscale, num=Y1)
+    q2 = np.linspace(-qscale*np.sqrt(2), qscale*np.sqrt(2), num=Y2)
+    if thres2 is None:
+        thres2 = thres
+    for i, ix in enumerate(A):
+        plt.figure(figsize=[6, 3])
+        c = np.mean(ix)
+        s = np.std(ix)
+        if i in [0, 1]:
+            plt.pcolormesh(q1, en, ix, cmap=stmpy.cm.gray_r,
+                           vmin=0, vmax=c+thres*s)
+        else:
+            plt.pcolormesh(q2, en, ix, cmap=stmpy.cm.gray_r,
+                           vmin=0, vmax=c+thres2*s)
+        plt.gca().set_xlim(-qlimit, qlimit)
+        plt.axvline(-1, linestyle='--')
+        plt.axvline(1, linestyle='--')
+        if saveon is True:
+            plt.savefig(
+                imgName + " along {}.{}".format(fname[i], extension), facecolor='w')
+
+
+def quick_show_single(A, en, thres=5, fs=4, qscale=None, rspace=False, saveon=False, 
+                        qlimit=1.2, imgName='', extension='png', dpi=400):
+    layers = len(A)
+    if rspace is False:
+        if qscale is None:
+            imgsize = np.shape(A)[-1]
+            if len(np.shape(A)) == 3:
+                A_topo = np.mean(A, axis=0)
+            else:
+                A_topo = A
+            bp_x = np.min(findBraggs(
+                A_topo, min_dist=int(imgsize/10), rspace=rspace))
+            ext = imgsize / (imgsize - 2*bp_x)
+        else:
+            ext = qscale
+    if len(np.shape(A)) == 3:
+        for i in range(layers):
+            plt.figure(figsize=[fs, fs])
+            c = np.mean(A[i])
+            s = np.std(A[i])
+            if rspace is True:
+                plt.imshow(A[i], clim=[c-thres*s, c+thres*s],
+                           cmap=stmpy.cm.jackyPSD)
+            else:
+                plt.imshow(A[i], extent=[-ext, ext, -ext, ext, ],
+                           clim=[0, c+thres*s], cmap=stmpy.cm.gray_r)
+                plt.xlim(-qlimit, qlimit)
+                plt.ylim(-qlimit, qlimit)
+            #stmpy.image.add_label("${}$ mV".format(int(en[i])), ax=plt.gca())
+            plt.gca().axes.get_xaxis().set_visible(False)
+            plt.gca().axes.get_yaxis().set_visible(False)
+            plt.gca().set_frame_on(False)
+            plt.gca().set_aspect(1)
+            if saveon is True:
+                if extension == 'png':
+                    plt.savefig("{} at {} mV.{}".format(imgName, int(
+                        en[i]), extension), dpi=dpi, bbox_inches='tight', pad_inches=0)
+                else:
+                    plt.savefig("{} at {} mV.{}".format(imgName, int(
+                        en[i]), extension), bbox_inches='tight', pad_inches=0)
+    elif len(np.shape(A)) == 2:
+        plt.figure(figsize=[fs, fs])
+        c = np.mean(A)
+        s = np.std(A)
+        if rspace is True:
+            plt.imshow(A, clim=[c-thres*s, c+thres*s], cmap=stmpy.cm.jackyPSD)
+        else:
+            plt.imshow(A, extent=[-ext, ext, -ext, ext, ],
+                       clim=[0, c+thres*s], cmap=stmpy.cm.gray_r)
+            plt.xlim(-qlimit, qlimit)
+            plt.ylim(-qlimit, qlimit)
+        #stmpy.image.add_label("${}$ mV".format(int(en)), ax=plt.gca())
+        plt.gca().axes.get_xaxis().set_visible(False)
+        plt.gca().axes.get_yaxis().set_visible(False)
+        plt.gca().set_frame_on(False)
+        plt.gca().set_aspect(1)
+        if saveon is True:
+            if extension == 'png':
+                plt.savefig("{} at {} mV.{}".format(imgName, int(
+                    en), extension), dpi=dpi, bbox_inches='tight', pad_inches=0)
+            else:
+                plt.savefig("{} at {} mV.{}".format(imgName, int(
+                    en), extension), bbox_inches='tight', pad_inches=0)
+
+
+def quick_plot(A, rspace=True, thres=3, fs=4, qscale=None, qlimit=1.2,  clims=None, cmap=None,
+                      saveon=False, imgName=None, extension='png', dpi=400, **kwargs):
+    
+    '''
+    Display 2D real space and FT images with a set of standard settings.
+    
+    Inputs:
+        A           - Required : 2D arrays of real space or FT image to dispaly
+        rspace      - Optional : bool, flag to indicate if A is a real space or FT image
+        thres       - Optional : float, number of sigma to control the color limit
+        fs          - Optional : float, figure size 
+        qscale      - Optional : float, specify the extent for the FT image
+        qlimit      - Optional : float, specify the range to plot for the FT image
+        clims       - Optional : list, specify the color limit for imshow. If not give, clims will be computed based on mean and std of A.
+        imgName     - Optional : String, default None. If not None image will be saved with the name imgName
+        kwargs      - Optional : key word arguments used in imshow()
+    Returns:
+        No return 
+
+    Usage:
+        import stmpy
+        import stmpy.driftcorr as dfc
+        dfc.quick_plot(d.z)
+        d.z_ft = stmpy.tools.fft(d.z, zeroDC=True)
+        dfc.quick_plot(d.z_ft, rspace=False)
+
+    History:
+        05/25/2023        RL : Initial commit.
+    '''
+    
+    plt.figure(figsize=[fs, fs])
+    c = np.mean(A)
+    s = np.std(A)
+    
+    # compute the color limit if clims is not given
+    if clims == None:
+        if rspace == True:
+            clims = [c-thres*s, c+thres*s]
+        else:
+            clims = [0, c+thres*s]
+    
+    # compute the FT image qscale if qscale is not given
+    if qscale == None:
+        extents = None
+    else:
+        extents = [-qscale, qscale, -qscale, qscale, ]
+        
+    # Use the default color maps if cmap is not set
+    if cmap == None:
+        cmap = stmpy.cm.blue2 if rspace else stmpy.cm.gray_r
+        
+    if rspace == True:
+        plt.imshow(A, clim=clims, cmap=cmap, **kwargs)
+        plt.gca().set_aspect(1)
+    else:
+        plt.imshow(A, extent=extents, clim=clims, cmap=cmap, **kwargs)
+    plt.gca().axes.get_xaxis().set_visible(False)
+    plt.gca().axes.get_yaxis().set_visible(False)
+    plt.gca().set_frame_on(False)
+    
+    if imgName != None:
+        if extension == 'png':
+            plt.savefig("{}.{}".format(imgName, extension), dpi=dpi, bbox_inches='tight', pad_inches=0)
+        else:
+            plt.savefig("{}.{}".format(imgName, extension), bbox_inches='tight', pad_inches=0)
 
