@@ -47,7 +47,8 @@ History:
 # 3. PHASE MAP & DRIFT FIELD CALCULATION
 # 4. DRIFT CORRECTION 
 # 5. CROPPING AND GEOMETRY UTILITIES
-# 6. FOURIER FILTERING AND GAUSSIANS
+# 6. DISPLAY AND PLOTTING UTILITIES
+# 7. FOURIER FILTERING AND GAUSSIANS
 # -----------------------------------------------------------------------------
 
 
@@ -1064,130 +1065,6 @@ def _apply_dfc_3d(A, ux, uy, matrix, bp=None, n1=None, n2=None, method='lockin')
     return data_out
 
 
-def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp_angle=None, orient=None, bp_c=None,\
-                sigma=10, method='lockin', even_out=False, show=True, **kwargs):
-    '''
-    This method find drift parameters from a 2D map automatically.
-
-    Input:
-        A           - Required : 2D array of topo or LIY in real space.
-        r           - Optional : width of the gaussian mask, ratio to the full map size, to remove low-q noise, =r*width
-                                    Set r=None will disable this mask.
-        w           - Optional : width of the mask that filters out noise along qx=0 and qy=0 lines.
-                                    Set w=None will disable this mask.
-        mask3       - Optional : Tuple for custom-defined mask. mask3 = [n, offset, width], where n is order of symmetry, 
-                                    offset is initial angle, width is the width of the mask. e.g., mask3 = [4, np.pi/4, 5], 
-                                    or mask3 = [6, 0, 10].
-                                    Set mask3=None will disable this mask.
-        even_out    - Optional : Boolean, if True then Bragg peaks will be rounded to the make sure there are even number of lattice
-        cut1        - Optional : List of length 1 or length 4, specifying how much bad area or area with too large drift to be cut
-        cut2        - Optional : List of length 1 or length 4, specifying after local drift correction how much to crop on the edge
-        angle_offset- Optional : The min offset angle of the Bragg peak to the x-axis, in unit of rad
-        bp_angle    - Optional : The angle between neighboring Bragg peaks, if not given, it will be computed based on all Bragg peaks
-        orient      - Optional : The orientation of the Bragg peaks with respect to the x-axis
-        bp_c        - Optional : The correct Bragg peak position that user wants after the drift correction  
-        sigma       - Optional : Floating number specifying the size of mask to be used in phasemap()
-        method      - Optional : Specifying which method to apply the drift correction
-                                    "lockin": Interpolate A and then apply it to a new set of coordinates, (x-ux, y-uy)
-                                    "convolution": Used inversion fft to apply the drift fields
-        show        - Optional : Boolean, if True then A and Bragg peaks will be plotted out.
-        **kwargs    - Optional : key word arguments for findBraggs function
-
-    Returns:
-        p           : A dict of parameters that can be directly applied to drift correct orther 2D or 3D datasets
-
-    Usage:
-        p = find_drift(z, sigma=4, cut1=None, cut2=[0,7,0,7], show=True)
-
-    History:
-        06/23/2020  - RL : Initial commit.
-    '''
-    p = {}
-    if cut1 is not None:
-        A = cropedge_new(A, n=cut1)
-
-    if bp_c is None:
-        # find the Bragg peak before the drift correction 
-        bp1 = findBraggs(A, r=r, w=w, mask3=mask3, show=show, **kwargs)
-        bp1 = sortBraggs(bp1, s=np.shape(A))
-        # Find the angle between each Bragg peaks
-        if bp_angle is None:
-            N = len(bp1)
-            Q = bp_to_q(bp1, A)
-            angles = []
-            for i in range(N-1):
-                angles.append(np.arctan2(*Q[i+1]) - np.arctan2(*Q[i]))
-            # Here is the commonly used angles in the real world
-            angle_list = np.array([0, np.pi/6, np.pi/4, np.pi/3, np.pi/2])
-            offset = np.absolute(np.mean(angles) - angle_list)
-            index = np.argmin(offset)
-            bp_angle = angle_list[index]
-            if orient is None:
-                orient = np.arctan2(*Q[0][::-1])
-        # Calculate the correction position of each Bragg peak
-        bp_c = generate_bp(A, bp1, angle=bp_angle, orient= orient, even_out=even_out)
-    else:
-        bp1 = bp_c
-    
-    # Find the phasemap 
-    thetax, thetay, Q1, Q2 = phasemap(A, bp=bp_c, method=method, sigma=sigma)
-
-    phix = fixphaseslip(thetax, method='unwrap')
-    phiy = fixphaseslip(thetay, method='unwrap')
-    ux, uy = driftmap(phix, phiy, Q1, Q2, method=method)
-    z_temp = driftcorr(A, ux, uy, method=method, interpolation='cubic')
-    
-    # This part interpolates the drift corrected maps
-    if cut2 is None:
-        z_c = z_temp
-    else:
-        bp3 = findBraggs(z_temp, r=r, w=w, mask3=mask3, **kwargs)
-        z_c = cropedge_new(z_temp, n=cut2, bp=bp3, force_commen=True)
-        p['bp3'] = bp3
-    
-    # This part displays the intermediate maps in the process of drift correction
-    if show is True:
-        fig, ax = plt.subplots(1, 2, figsize=[8, 4])
-        c = np.mean(phix)
-        s = np.std(phix)
-        fig.suptitle('Phasemaps after fixing phase slips:')
-        ax[0].imshow(phix, origin='lower', clim=[c-5*s, c+5*s])
-        ax[1].imshow(phiy, origin='lower', clim=[c-5*s, c+5*s])
-        
-        A_fft = stmpy.tools.fft(A, zeroDC=True)
-        B_fft = stmpy.tools.fft(z_c, zeroDC=True)
-        c1 = np.mean(A_fft)
-        s1 = np.std(A_fft)
-        
-        c2 = np.mean(A)
-        s2 = np.std(A)
-
-        fig, ax = plt.subplots(2, 2, figsize=[8, 8])
-        fig.suptitle('Maps before and after drift correction:')
-        ax[0,0].imshow(A, cmap=stmpy.cm.blue2, origin='lower', clim=[c2-5*s2, c2+5*s2])
-        ax[0,1].imshow(A_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c1+5*s1])
-        ax[1,0].imshow(z_c, cmap=stmpy.cm.blue2, origin='lower', clim=[c2-5*s2, c2+5*s2])
-        ax[1,1].imshow(B_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c1+5*s1])
-    
-    p['cut1'] = cut1
-    p['cut2'] = cut2
-    p['r'] = r
-    p['w'] = w
-    p['mask3'] = mask3
-    p['sigma'] = sigma
-    p['method'] = method
-    p['even_out'] = even_out
-    p['bp_c'] = bp_c
-    p['bp_angle'] = bp_angle
-    p['orient'] = orient
-    p['bp1'] = bp1
-    p['phix'] = phix
-    p['phiy'] = phiy
-    p['ux'] = ux
-    p['uy'] = uy
-
-    return z_c, p
-
 def apply_drift_parameter(A, p, **kwargs):
     '''
     Apply the drifr correction parameters p to the 2D or 3D map A.
@@ -1275,10 +1152,10 @@ def find_drift(self, A, r=None, w=None, mask3=None, cut1=None, cut2=None, \
     if cut1 is not None:
         A = cropedge(A, n=cut1)
     if not hasattr(self, 'bp_parameters'):
-        self.bp1 = findBraggs(A, r=r, w=w, mask3=mask3, update_obj=True, obj=self,  \
+        self.bp1 = _findBraggs(A, r=r, w=w, mask3=mask3, update_obj=True, obj=self,  \
                                 show=show, even_out=even_out, **kwargs)
     else:
-        self.bp1 = findBraggs(A, r=r, w=w, mask3=mask3, update_obj=True, obj=self,  \
+        self.bp1 = _findBraggs(A, r=r, w=w, mask3=mask3, update_obj=True, obj=self,  \
                                 show=show, even_out=even_out, **kwargs)
         # self.bp1 = findBraggs(A, obj=self, show=show)
 
@@ -1313,7 +1190,7 @@ def find_drift(self, A, r=None, w=None, mask3=None, cut1=None, cut2=None, \
     ztemp = driftcorr(A, self.ux, self.uy, method=method, interpolation='cubic')
     
     # This part interpolates the drift corrected maps
-    self.bp3 = findBraggs(ztemp, obj=self)
+    self.bp3 = _findBraggs(ztemp, obj=self)
     if cut2 is None:
         cut2 = 0
         force_commen = False
@@ -1346,7 +1223,7 @@ def find_drift(self, A, r=None, w=None, mask3=None, cut1=None, cut2=None, \
         ax[1,0].imshow(self.zc, cmap=stmpy.cm.blue2, origin='lower', clim=[c2-5*s2, c2+5*s2])
         ax[1,1].imshow(B_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c1+5*s1])
         
-    self.bp = findBraggs(self.zc, obj=self)
+    self.bp = _findBraggs(self.zc, obj=self)
 
 #8. - driftcorr
 def driftcorr(A, ux=None, uy=None, method="lockin", interpolation='cubic'):
@@ -1815,6 +1692,297 @@ def _rough_cut(A, n):
         return B[:, n3:-n4, n1:-n2]
 
     
+# =============================================================================
+# 6. DISPLAY AND PLOTTING UTILITIES
+# =============================================================================
+
+def display(*args, sigma=3, clim_same=True):
+    '''
+    Display or compare images in both real space and q-space.
+
+    Inputs:
+        *args       - Required : Any number of real space images to display.
+        sigma       - Optional : sigma for the color limit.
+        clim_same   - Optional : If True, then the FT of the images will be displayed under the
+                                    same color limit (determined by the first image).
+
+    Returns:
+        N/A
+
+    Usage:
+        import stmpy.driftcorr as dfc
+        dfc.display(topo.z)
+    '''
+    fft_images = [stmpy.tools.fft(A, zeroDC=True) for A in args]
+    if clim_same:
+        c, s = np.mean(fft_images[0]), np.std(fft_images[0])
+        global_clim = (c, s)
+
+    # Define the subplot grid
+    fig, ax = plt.subplots(len(args), 2, figsize=[8, 4*len(args)])
+
+    for i, A in enumerate(args):
+        A_fft = stmpy.tools.fft(A, zeroDC=True)
+        c, s = global_clim if clim_same else (np.mean(A_fft), np.std(A_fft))
+        
+        # Adjust for multiple or single subplots
+        if len(args) > 1:
+            ax[i, 0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+            ax[i, 1].imshow(A_fft, cmap=stmpy.cm.gray_r,
+                            origin='lower', clim=[0, c+sigma*s])
+            ax[i, 0].set_aspect(1)
+            ax[i, 1].set_aspect(1)
+        else:
+            ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+            ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r,
+                        origin='lower', clim=[0, c+sigma*s])
+            ax[0].set_aspect(1)
+            ax[1].set_aspect(1)
+
+
+def quick_linecut(A, width=2, n=4, bp=None, ax=None, thres=3):
+    """
+    Take four linecuts automatically, horizontal, vertical, and two diagonal.
+    Inputs:
+        A           - Required : FT space image to take linecuts.
+        width       - Optional : Number of pixels for averaging.
+        bp          - Optional : Bragg peaks
+        thres       - Optional : threshold for displaying FT
+
+    Returns:
+        N/A
+
+    Usage:
+        import stmpy.driftcorr as dfc
+        r, cut = dfc.quick_linecut(A)
+
+    """
+    Y = np.shape(A)[-2] / 2
+    X = np.shape(A)[-1] / 2
+    r = []
+    cut = []
+    start = [[0, Y], [X, 0], [0, 0], [0, Y*2]]
+    end = [[X*2, Y], [X, Y*2], [X*2, Y*2], [X*2, 0]]
+    color = ['r', 'g', 'b', 'k']
+
+    plt.figure(figsize=[4, 4])
+    if len(np.shape(A)) == 3:
+        if bp is None:
+            bp_x = np.min(findBraggs(np.mean(A, axis=0), rspace=False))
+        else:
+            bp_x = bp
+        cm = np.mean(np.mean(A, axis=0))
+        cs = np.std(np.mean(A, axis=0))
+        plt.imshow(np.mean(A, axis=0), clim=[0, cm+thres*cs])
+    elif len(np.shape(A)) == 2:
+        if bp is None:
+            bp_x = np.min(findBraggs(A, rspace=False))
+        else:
+            bp_x = bp
+        cm = np.mean(A)
+        cs = np.std(A)
+        plt.imshow(A, clim=[0, cm+thres*cs])
+
+    qscale = X*2 / (X*2 - bp_x * 2)
+
+    for i in range(n):
+        r1, cut1 = stmpy.tools.linecut(A, start[i], end[i],
+                                       width=width, show=True, ax=plt.gca(), color=color[i])
+        r.append(r1)
+        cut.append(cut1)
+    plt.gca().set_xlim(-1, X*2+1)
+    plt.gca().set_ylim(-1, Y*2+1)
+    return qscale, cut
+
+
+def quick_show(A, en, thres=5, rspace=True, saveon=False, qlimit=1.2, imgName='', extension='png'):
+    layers = len(A)
+    if rspace is False:
+        imgsize = np.shape(A)[-1]
+        bp_x = np.min(findBraggs(np.mean(A, axis=0),
+                                 min_dist=int(imgsize/10), rspace=rspace))
+        ext = imgsize / (imgsize - 2*bp_x)
+    if layers > 12:
+        skip = layers // 12
+    else:
+        skip = 1
+    fig, ax = plt.subplots(3, 4, figsize=[16, 12])
+    try:
+        for i in range(12):
+            c = np.mean(A[i*skip])
+            s = np.std(A[i*skip])
+            if rspace is True:
+                ax[i//4, i % 4].imshow(A[i*skip], clim=[c -
+                                                        thres*s, c+thres*s], cmap=stmpy.cm.jackyPSD)
+            else:
+                ax[i//4, i % 4].imshow(A[i*skip], extent=[-ext, ext, -ext, ext, ],
+                                       clim=[0, c+thres*s], cmap=stmpy.cm.gray_r)
+                ax[i//4, i % 4].set_xlim(-qlimit, qlimit)
+                ax[i//4, i % 4].set_ylim(-qlimit, qlimit)
+            stmpy.image.add_label("${}$ mV".format(
+                int(en[i*skip])), ax=ax[i//4, i % 4])
+    except IndexError:
+        pass
+    if saveon is True:
+        plt.savefig("{}.{}".format(imgName, extension), bbox_inches='tight')
+
+
+def quick_show_cut(A, en, qscale, thres=5, thres2=None, saveon=False, qlimit=1.2, imgName='', extension="png"):
+    fname = ["M-0", "M-90", "X-45", "X-135"]
+    X1, Y1 = np.shape(A[0])
+    X2, Y2 = np.shape(A[-1])
+    q1 = np.linspace(-qscale, qscale, num=Y1)
+    q2 = np.linspace(-qscale*np.sqrt(2), qscale*np.sqrt(2), num=Y2)
+    if thres2 is None:
+        thres2 = thres
+    for i, ix in enumerate(A):
+        plt.figure(figsize=[6, 3])
+        c = np.mean(ix)
+        s = np.std(ix)
+        if i in [0, 1]:
+            plt.pcolormesh(q1, en, ix, cmap=stmpy.cm.gray_r,
+                           vmin=0, vmax=c+thres*s)
+        else:
+            plt.pcolormesh(q2, en, ix, cmap=stmpy.cm.gray_r,
+                           vmin=0, vmax=c+thres2*s)
+        plt.gca().set_xlim(-qlimit, qlimit)
+        plt.axvline(-1, linestyle='--')
+        plt.axvline(1, linestyle='--')
+        if saveon is True:
+            plt.savefig(
+                imgName + " along {}.{}".format(fname[i], extension), facecolor='w')
+
+
+def quick_show_single(A, en, thres=5, fs=4, qscale=None, rspace=False, saveon=False, 
+                        qlimit=1.2, imgName='', extension='png', dpi=400):
+    layers = len(A)
+    if rspace is False:
+        if qscale is None:
+            imgsize = np.shape(A)[-1]
+            if len(np.shape(A)) == 3:
+                A_topo = np.mean(A, axis=0)
+            else:
+                A_topo = A
+            bp_x = np.min(findBraggs(
+                A_topo, min_dist=int(imgsize/10), rspace=rspace))
+            ext = imgsize / (imgsize - 2*bp_x)
+        else:
+            ext = qscale
+    if len(np.shape(A)) == 3:
+        for i in range(layers):
+            plt.figure(figsize=[fs, fs])
+            c = np.mean(A[i])
+            s = np.std(A[i])
+            if rspace is True:
+                plt.imshow(A[i], clim=[c-thres*s, c+thres*s],
+                           cmap=stmpy.cm.jackyPSD)
+            else:
+                plt.imshow(A[i], extent=[-ext, ext, -ext, ext, ],
+                           clim=[0, c+thres*s], cmap=stmpy.cm.gray_r)
+                plt.xlim(-qlimit, qlimit)
+                plt.ylim(-qlimit, qlimit)
+            #stmpy.image.add_label("${}$ mV".format(int(en[i])), ax=plt.gca())
+            plt.gca().axes.get_xaxis().set_visible(False)
+            plt.gca().axes.get_yaxis().set_visible(False)
+            plt.gca().set_frame_on(False)
+            plt.gca().set_aspect(1)
+            if saveon is True:
+                if extension == 'png':
+                    plt.savefig("{} at {} mV.{}".format(imgName, int(
+                        en[i]), extension), dpi=dpi, bbox_inches='tight', pad_inches=0)
+                else:
+                    plt.savefig("{} at {} mV.{}".format(imgName, int(
+                        en[i]), extension), bbox_inches='tight', pad_inches=0)
+    elif len(np.shape(A)) == 2:
+        plt.figure(figsize=[fs, fs])
+        c = np.mean(A)
+        s = np.std(A)
+        if rspace is True:
+            plt.imshow(A, clim=[c-thres*s, c+thres*s], cmap=stmpy.cm.jackyPSD)
+        else:
+            plt.imshow(A, extent=[-ext, ext, -ext, ext, ],
+                       clim=[0, c+thres*s], cmap=stmpy.cm.gray_r)
+            plt.xlim(-qlimit, qlimit)
+            plt.ylim(-qlimit, qlimit)
+        #stmpy.image.add_label("${}$ mV".format(int(en)), ax=plt.gca())
+        plt.gca().axes.get_xaxis().set_visible(False)
+        plt.gca().axes.get_yaxis().set_visible(False)
+        plt.gca().set_frame_on(False)
+        plt.gca().set_aspect(1)
+        if saveon is True:
+            if extension == 'png':
+                plt.savefig("{} at {} mV.{}".format(imgName, int(
+                    en), extension), dpi=dpi, bbox_inches='tight', pad_inches=0)
+            else:
+                plt.savefig("{} at {} mV.{}".format(imgName, int(
+                    en), extension), bbox_inches='tight', pad_inches=0)
+
+
+def quick_plot(A, rspace=True, thres=3, fs=4, qscale=None, qlimit=1.2,  clims=None, cmap=None,
+                      saveon=False, imgName=None, extension='png', dpi=400, **kwargs):
+    
+    '''
+    Display 2D real space and FT images with a set of standard settings.
+    
+    Inputs:
+        A           - Required : 2D arrays of real space or FT image to dispaly
+        rspace      - Optional : bool, flag to indicate if A is a real space or FT image
+        thres       - Optional : float, number of sigma to control the color limit
+        fs          - Optional : float, figure size 
+        qscale      - Optional : float, specify the extent for the FT image
+        qlimit      - Optional : float, specify the range to plot for the FT image
+        clims       - Optional : list, specify the color limit for imshow. If not give, clims will be computed based on mean and std of A.
+        imgName     - Optional : String, default None. If not None image will be saved with the name imgName
+        kwargs      - Optional : key word arguments used in imshow()
+    Returns:
+        No return 
+
+    Usage:
+        import stmpy
+        import stmpy.driftcorr as dfc
+        dfc.quick_plot(d.z)
+        d.z_ft = stmpy.tools.fft(d.z, zeroDC=True)
+        dfc.quick_plot(d.z_ft, rspace=False)
+
+    History:
+        05/25/2023        RL : Initial commit.
+    '''
+    
+    plt.figure(figsize=[fs, fs])
+    c = np.mean(A)
+    s = np.std(A)
+    
+    # compute the color limit if clims is not given
+    if clims == None:
+        if rspace == True:
+            clims = [c-thres*s, c+thres*s]
+        else:
+            clims = [0, c+thres*s]
+    
+    # compute the FT image qscale if qscale is not given
+    if qscale == None:
+        extents = None
+    else:
+        extents = [-qscale, qscale, -qscale, qscale, ]
+        
+    # Use the default color maps if cmap is not set
+    if cmap == None:
+        cmap = stmpy.cm.blue2 if rspace else stmpy.cm.gray_r
+        
+    if rspace == True:
+        plt.imshow(A, clim=clims, cmap=cmap, **kwargs)
+        plt.gca().set_aspect(1)
+    else:
+        plt.imshow(A, extent=extents, clim=clims, cmap=cmap, **kwargs)
+    plt.gca().axes.get_xaxis().set_visible(False)
+    plt.gca().axes.get_yaxis().set_visible(False)
+    plt.gca().set_frame_on(False)
+    
+    if imgName != None:
+        if extension == 'png':
+            plt.savefig("{}.{}".format(imgName, extension), dpi=dpi, bbox_inches='tight', pad_inches=0)
+        else:
+            plt.savefig("{}.{}".format(imgName, extension), bbox_inches='tight', pad_inches=0)
 
 # =============================================================================
 # 7. FOURIER FILTERING AND GAUSSIANS
