@@ -915,6 +915,178 @@ def highpass(data, ncutoff=0.5, order=1, method='pad', padtype='odd', irlen=None
     return y
 
 
+
+def highpass_origin(
+    data,
+    rcut=None,                 # cutoff radius in pixels (distance from FFT center)
+    frac=None,                 # OR: fraction of Nyquist radius (0..1), e.g. 0.02 ≈ 2% of Nyquist
+    kind="butterworth",        # 'ideal' | 'butterworth' | 'gaussian'
+    order=2,                   # Butterworth order (ignored for others)
+    sigma=None,                # Gaussian sigma [pixels]; if None, set ~-3 dB at r=rcut
+    window='None',             # forwarded to *returned* FFT; internal filtering uses raw FFT
+    beta=8.0,                  # kaiser beta if window='kaiser' (for returned FFT)
+    zeroDC=True,               # subtract mean and zero DC before transforms
+    units='None',              # forwarded to *returned* FFT (e.g. 'amplitude' or 'None')
+    return_fft=False,          # if True, also return an FFT whose format matches stmpy.tools.fft(...)
+    fft_return_output='absolute',  # 'absolute'|'real'|'imag'|'phase'|'complex' for the returned FFT
+    preserve_dtype=True,       # cast spatial output back to the original floating/complex dtype
+    return_mask=False          # also return the radial mask M if True
+):
+    """
+    High-pass filter around the FFT origin (Γ) to remove low-frequency noise.
+
+    Returns
+    -------
+    filtered : np.ndarray
+        Filtered data in the same shape as input. If `preserve_dtype=True` and
+        the input is float or complex, the dtype is restored.
+    (optional) F_formatted : np.ndarray
+        If `return_fft=True`, the FFT of `filtered` computed via your `fft()`
+        using `fft_return_output`, `window`, `zeroDC`, `beta`, and `units`,
+        so its format exactly matches a direct call: fft(filtered, ...).
+    (optional) M : np.ndarray
+        If `return_mask=True`, the high-pass mask used in k-space.
+    """
+    
+    # --- helpers: center-coordinate grids and masks ---
+    def _center_coords_1d(N):
+        i = np.arange(N)
+        c = (N - 1) / 2.0
+        r = np.abs(i - c)
+        nyq = N / 2.0
+        return r, nyq
+
+    def _center_coords_2d(H, W):
+        # coordinates compatible with fftshift-centering and your 1..W / 1..H style
+        y = np.linspace(1, H, H)[:, None]
+        xg = np.linspace(1, W, W)[None, :]
+        cy = (H + 1) / 2.0
+        cx = (W + 1) / 2.0
+        r = np.sqrt((xg - cx) ** 2 + (y - cy) ** 2)
+        nyq = min(H, W) / 2.0
+        return r, nyq
+
+    def _resolve_rcut_1d(N):
+        if rcut is not None:
+            return float(rcut)
+        if frac is not None:
+            return float(frac) * (N / 2.0)
+        raise ValueError("Provide either rcut (pixels) or frac (0..1).")
+
+    def _resolve_rcut_2d(H, W):
+        if rcut is not None:
+            return float(rcut)
+        if frac is not None:
+            return float(frac) * (min(H, W) / 2.0)
+        raise ValueError("Provide either rcut (pixels) or frac (0..1).")
+
+    def _butter_hp(r, rc, n):
+        eps = 1e-12
+        rr = np.maximum(r, eps)
+        return 1.0 / (1.0 + (rc / rr) ** (2 * n))
+
+    def _gauss_hp(r, rc, s):
+        return 1.0 - np.exp(-(r * r) / (2.0 * s * s + 1e-30))
+
+    def _mask_1d(N, rc):
+        r, _ = _center_coords_1d(N)
+        if kind == 'ideal':
+            return (r > rc).astype(float)
+        elif kind == 'butterworth':
+            return _butter_hp(r, rc, max(1, int(order)))
+        elif kind == 'gaussian':
+            s = sigma
+            if s is None:
+                target = 1.0 - 1.0 / np.sqrt(2.0)  # -3 dB at cutoff
+                s = rc / np.sqrt(2.0 * np.log(1.0 / target))
+            return _gauss_hp(r, rc, s)
+        else:
+            raise ValueError("kind must be 'ideal', 'butterworth', or 'gaussian'")
+
+    def _mask_2d(H, W, rc):
+        r, _ = _center_coords_2d(H, W)
+        if kind == 'ideal':
+            return (r > rc).astype(float)
+        elif kind == 'butterworth':
+            return _butter_hp(r, rc, max(1, int(order)))
+        elif kind == 'gaussian':
+            s = sigma
+            if s is None:
+                target = 1.0 - 1.0 / np.sqrt(2.0)  # -3 dB at cutoff
+                s = rc / np.sqrt(2.0 * np.log(1.0 / target))
+            return _gauss_hp(r, rc, s)
+        else:
+            raise ValueError("kind must be 'ideal', 'butterworth', or 'gaussian'")
+
+    # --- main logic ---
+    x = np.asarray(data)
+    ndim = x.ndim
+    if ndim not in (1, 2, 3):
+        raise ValueError("data must be 1D, 2D, or 3D (stack of 2D).")
+
+    orig_dtype = x.dtype
+    is_complex_in = np.iscomplexobj(x)
+
+    # Note: internal FFTs are always raw complex to avoid unit rescaling before IFT.
+    # We only honor `units`, `window`, and output mode on the *returned* FFT.
+    def _fft_raw(img):
+        return fft(img, window='None', output='complex', zeroDC=zeroDC, beta=beta, units='None')
+
+    def _ifft_to_spatial(Fc):
+        return ifft(Fc, output=('complex' if is_complex_in else 'real'))
+
+    # 1D
+    if ndim == 1:
+        N = x.shape[0]
+        rc = _resolve_rcut_1d(N)
+        M = _mask_1d(N, rc)
+        F = _fft_raw(x)
+        Ff = F * M
+        out = _ifft_to_spatial(Ff)
+
+    # 2D
+    elif ndim == 2:
+        H, W = x.shape
+        rc = _resolve_rcut_2d(H, W)
+        M = _mask_2d(H, W, rc)
+        F = _fft_raw(x)
+        Ff = F * M
+        out = _ifft_to_spatial(Ff)
+
+    # 3D: stack of 2D slices
+    else:
+        N, H, W = x.shape
+        rc = _resolve_rcut_2d(H, W)
+        M = _mask_2d(H, W, rc)
+        out = np.empty_like(x, dtype=(orig_dtype if np.issubdtype(orig_dtype, np.complexfloating)
+                                      else np.float64))
+        for i in range(N):
+            F = _fft_raw(x[i])
+            Ff = F * M
+            yi = _ifft_to_spatial(Ff)
+            out[i] = yi
+
+    # dtype preservation for spatial output
+    if preserve_dtype:
+        if np.issubdtype(orig_dtype, np.floating) and not is_complex_in:
+            out = out.astype(orig_dtype, copy=False)
+        elif np.issubdtype(orig_dtype, np.complexfloating):
+            out = out.astype(orig_dtype, copy=False)
+        # For integer input, we keep float output (avoid silent clipping).
+
+    if not return_fft and not return_mask:
+        return out
+
+    # Compute an FFT of the filtered data with your public API so the *format*
+    # (dtype/shape/semantics) matches a direct call to fft(filtered, ...).
+    F_formatted = fft(out, window=window, output=fft_return_output,
+                      zeroDC=zeroDC, beta=beta, units=units)
+
+    if return_mask:
+        return out, F_formatted, M
+    else:
+        return out, F_formatted
+        
 def gradfilter(A, x, y, genvec=False):
     '''
     Minimum gradient filter for dispersive features (Ref. arXiv:1612.07880), returns filtered image
@@ -1202,13 +1374,18 @@ def fft(dataIn, window='None', output='absolute', zeroDC=False, beta=1.0,
     Inputs:
         dataIn    - Required : A 1D, 2D or 3D numpy array
         window  - Optional : String containing windowing function used to mask
-                             data.  The options are: 'None' (or 'none'), 'bartlett',
+                             data.  
+                             Type of window function to apply before FFT. 
+                             Reduces spectral leakage (sidelobes) at the 
+                             cost of frequency resolution (mainlobe broadening).
+                             The options are: 'None' (or 'none'), 'bartlett',
                              'blackman', 'hamming', 'hanning' and 'kaiser'.
         output  - Optional : String containing desired form of output.  The
                              options are: 'absolute', 'real', 'imag', 'phase'
                              or 'complex'.
-        zeroDC  - Optional : Boolean indicated if the centeral pixel of the
-                                FFT will be set to zero.
+        zeroDC  - Optional : Boolean. If True, subtracts the mean from data 
+                              (removes DC offset) and also explicitly sets 
+                              the DC bin (0,0) to zero in 2D.
         beta    - Optional : Float used to specify the kaiser window.  Only
                                used if window='kaiser'.
         units   - Optional : String containing desired units for the FFT.
