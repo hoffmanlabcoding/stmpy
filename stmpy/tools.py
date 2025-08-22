@@ -946,6 +946,11 @@ def highpass_origin(
         so its format exactly matches a direct call: fft(filtered, ...).
     (optional) M : np.ndarray
         If `return_mask=True`, the high-pass mask used in k-space.
+
+    
+    History:
+        2025-08-22  - Zeyu Ma : Added this function
+        
     """
     
     # --- helpers: center-coordinate grids and masks ---
@@ -1086,6 +1091,208 @@ def highpass_origin(
         return out, F_formatted, M
     else:
         return out, F_formatted
+
+def notch_at_points(
+    data,
+    points,                    # single (x,y) or list/array of (x,y) pixel coords; for 1D, use int(s) x only
+    rcut=None,                 # notch radius [pixels]
+    frac=None,                 # OR: fraction of Nyquist radius (0..1); applies uniformly to all points
+    kind="butterworth",        # 'ideal' | 'butterworth' | 'gaussian'
+    order=2,                   # Butterworth order
+    sigma=None,                # Gaussian sigma [pixels]; if None, set ~-3 dB at r=rcut
+    mirror=True,               # also notch the conjugate-symmetric partner about FFT center
+    window='None',             # forwarded to *returned* FFT; internal filtering uses raw FFT
+    beta=8.0,                  # kaiser beta if window='kaiser' (for returned FFT)
+    zeroDC=True,               # subtract mean and zero DC before transforms
+    units='None',              # forwarded to *returned* FFT (e.g. 'amplitude' or 'None')
+    return_fft=False,          # if True, also return formatted FFT of the filtered output
+    fft_return_output='absolute',  # 'absolute'|'real'|'imag'|'phase'|'complex' for the returned FFT
+    preserve_dtype=True,       # cast spatial output back to original floating/complex dtype
+    return_mask=False          # also return the notch mask if True
+):
+    """
+    Apply a *notch* (localized stopband) around specified k-space pixel(s).
+
+    Parameters
+    ----------
+    points : (int,int) or list of (int,int) for 2D; int or list[int] for 1D
+        Pixel coordinates in the same 1..W / 1..H convention as your center coords.
+        Example: points=(34, 35) will notch around that location (and its mirror if mirror=True).
+
+    Returns
+    -------
+    filtered : np.ndarray
+    (optional) F_formatted : np.ndarray
+    (optional) M : np.ndarray
+        M is the multiplicative notch mask in k-space (fftshift convention).
+
+    History:
+        2025-08-22  - Zeyu Ma : Added this function
+    '''
+    """
+    x = np.asarray(data)
+    ndim = x.ndim
+    if ndim not in (1, 2, 3):
+        raise ValueError("data must be 1D, 2D, or 3D (stack of 2D).")
+
+    # --- normalize points input ---
+    def _as_point_list(pts, dims):
+        if dims == 1:
+            if np.isscalar(pts):
+                return [int(pts)]
+            return [int(p) for p in (pts if isinstance(pts, (list, tuple, np.ndarray)) else [pts])]
+        else:
+            # 2D points: list of (x, y)
+            if isinstance(pts, (list, tuple, np.ndarray)) and len(pts) == 2 and np.isscalar(pts[0]):
+                return [(float(pts[0]), float(pts[1]))]
+            out = []
+            for p in pts:
+                if len(p) != 2:
+                    raise ValueError("2D points must be (x,y).")
+                out.append((float(p[0]), float(p[1])))
+            return out
+
+    # --- coordinate helpers (match your fftshift-centered grids & 1..W / 1..H indexing) ---
+    def _center_coords_1d(N):
+        i = np.linspace(1, N, N)  # 1..N
+        c = (N + 1) / 2.0
+        return i, c, (N / 2.0)
+
+    def _center_coords_2d(H, W):
+        y = np.linspace(1, H, H)[:, None]
+        xg = np.linspace(1, W, W)[None, :]
+        cy = (H + 1) / 2.0
+        cx = (W + 1) / 2.0
+        return xg, y, cx, cy, (min(H, W) / 2.0)
+
+    def _resolve_rcut(nyq):
+        if rcut is not None:
+            return float(rcut)
+        if frac is not None:
+            return float(frac) * float(nyq)
+        raise ValueError("Provide either rcut (pixels) or frac (0..1).")
+
+    # --- prototype LOW-PASS around distance d, then convert to notch = 1 - LP ---
+    def _lp_profile(d, rc):
+        if kind == 'ideal':
+            return (d <= rc).astype(float)
+        elif kind == 'butterworth':
+            n = max(1, int(order))
+            eps = 1e-12
+            dd = np.maximum(d, eps)
+            return 1.0 / (1.0 + (dd / rc) ** (2 * n))
+        elif kind == 'gaussian':
+            s = sigma
+            # set -3 dB at rc when sigma is not provided: exp(-rc^2/(2 s^2)) = 1/sqrt(2)
+            if s is None:
+                s = rc / np.sqrt(2.0 * np.log(2.0))
+            return np.exp(-(d * d) / (2.0 * s * s + 1e-30))
+        else:
+            raise ValueError("kind must be 'ideal', 'butterworth', or 'gaussian'")
+
+    def _fft_raw(img):
+        # Use your public fft() but with raw/neutral options internally
+        return fft(img, window='None', output='complex', zeroDC=zeroDC, beta=beta, units='None')
+
+    def _ifft_to_spatial(Fc, is_complex_in):
+        return ifft(Fc, output=('complex' if is_complex_in else 'real'))
+
+    orig_dtype = x.dtype
+    is_complex_in = np.iscomplexobj(x)
+
+    # --- build notch mask(s) and apply ---
+    if ndim == 1:
+        N = x.shape[0]
+        i, c, nyq = _center_coords_1d(N)
+        rc = _resolve_rcut(nyq)
+
+        base_points = _as_point_list(points, 1)
+        all_points = list(base_points)
+        if mirror:
+            for p in base_points:
+                pm = 2.0 * c - float(p)
+                all_points.append(pm)
+
+        # multiplicative combination of notches
+        M = np.ones(N, dtype=float)
+        for p in all_points:
+            d = np.abs(i - float(p))
+            notch = 1.0 - _lp_profile(d, rc)
+            M *= notch
+
+        F = _fft_raw(x)
+        Ff = F * M
+        out = _ifft_to_spatial(Ff, is_complex_in)
+
+    elif ndim == 2:
+        H, W = x.shape
+        xg, y, cx, cy, nyq = _center_coords_2d(H, W)
+        rc = _resolve_rcut(nyq)
+
+        base_points = _as_point_list(points, 2)
+        all_points = list(base_points)
+        if mirror:
+            for (px, py) in base_points:
+                pmx = 2.0 * cx - float(px)
+                pmy = 2.0 * cy - float(py)
+                all_points.append((pmx, pmy))
+
+        M = np.ones((H, W), dtype=float)
+        for (px, py) in all_points:
+            d = np.sqrt((xg - float(px)) ** 2 + (y - float(py)) ** 2)
+            notch = 1.0 - _lp_profile(d, rc)
+            M *= notch
+
+        F = _fft_raw(x)
+        Ff = F * M
+        out = _ifft_to_spatial(Ff, is_complex_in)
+
+    else:
+        # 3D: N x H x W stack
+        N, H, W = x.shape
+        xg, y, cx, cy, nyq = _center_coords_2d(H, W)
+        rc = _resolve_rcut(nyq)
+
+        base_points = _as_point_list(points, 2)
+        all_points = list(base_points)
+        if mirror:
+            for (px, py) in base_points:
+                pmx = 2.0 * cx - float(px)
+                pmy = 2.0 * cy - float(py)
+                all_points.append((pmx, pmy))
+
+        M = np.ones((H, W), dtype=float)
+        for (px, py) in all_points:
+            d = np.sqrt((xg - float(px)) ** 2 + (y - float(py)) ** 2)
+            notch = 1.0 - _lp_profile(d, rc)
+            M *= notch
+
+        out = np.empty_like(x, dtype=(orig_dtype if np.issubdtype(orig_dtype, np.complexfloating)
+                                      else np.float64))
+        for i_slice in range(N):
+            F = _fft_raw(x[i_slice])
+            Ff = F * M
+            yi = _ifft_to_spatial(Ff, is_complex_in)
+            out[i_slice] = yi
+
+    # dtype preservation (spatial domain)
+    if preserve_dtype:
+        if np.issubdtype(orig_dtype, np.floating) and not is_complex_in:
+            out = out.astype(orig_dtype, copy=False)
+        elif np.issubdtype(orig_dtype, np.complexfloating):
+            out = out.astype(orig_dtype, copy=False)
+
+    if not return_fft and not return_mask:
+        return out
+
+    F_formatted = fft(out, window=window, output=fft_return_output,
+                      zeroDC=zeroDC, beta=beta, units=units)
+
+    if return_mask:
+        return out, F_formatted, M
+    else:
+        return out, F_formatted
+
         
 def gradfilter(A, x, y, genvec=False):
     '''
