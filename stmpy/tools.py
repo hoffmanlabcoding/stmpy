@@ -1725,36 +1725,58 @@ def fftfreq(px, nm):
     freqs = np.fft.fftfreq(px, float(nm)/(px))
     return np.fft.fftshift(freqs)
 
-
-def normalize(data, axis=0, condition='mean'):
+def normalize(data, axis=None, condition='mean', eps=1e-12, magnitude=False):
     '''
-    Normalize a 2D image line by line in the x or y direction.
+    Normalize a 1D/2D/3D numpy array line by line, per image, or globally.
 
     Inputs:
-        data    - Required : A 2D numpy array to be normalized
-        axis    - Optional : The axis along which each line is normalized.
-        condition - Optional : Function to use for normalization.  The line is
-                               divided by the condition.  Options are: 'max',
-                               'min', 'mean'.
-
-    Returns:
-        normData - 2D array containing normalized data
+        data      - Required : A numpy array
+                                 2D (H,W) : single image or stack of 1D lines
+                                 3D (N,H,W): stack of 2D images
+        axis      - Optional : Axis or axes along which to normalize.
+                               If None, normalize whole array.
+                               Examples:
+                                 axis=0       -> normalize along rows
+                                 axis=1       -> normalize along columns
+                                 axis=(-2,-1) -> normalize each 2D image (for stacks shaped N,H,W)
+                                 axis=None    -> global normalization
+        condition - Optional : Normalization function.
+                               Options: 'max', 'min', 'mean', 'l2'
+        eps       - Optional : Small number to avoid divide-by-zero.
+        magnitude - Optional : If True, compute condition on |data|
+                               (useful for complex FFTs).
 
     Usage:
         normData = normalize(data, axis=0, condition='mean')
 
     History:
         2017-06-16  - HP : Initial commit
+        2025-09-03  - ZM : Made compatible with 3D data
     '''
-    conditionOptions = {'max':np.max, 'mean':np.mean,
-                        'min':np.min}
-    cond = conditionOptions[condition]
-    dataT = np.moveaxis(data, axis, 0)
-    outputT = np.zeros_like(dataT)
-    for ix, line in enumerate(dataT):
-        outputT[ix] = line/cond(line)
-    output = np.moveaxis(outputT, 0, axis)
-    return output
+    def l2_norm(x, axis=None, keepdims=False):
+        return np.sqrt(np.sum(x * np.conj(x), axis=axis, keepdims=keepdims)).real
+
+    conds = {
+        'max' : np.max,
+        'min' : np.min,
+        'mean': np.mean,
+        'l2'  : l2_norm
+    }
+
+    if condition not in conds:
+        raise ValueError(f"condition must be one of {list(conds.keys())}")
+
+    x = np.abs(data) if magnitude else data
+    cond = conds[condition]
+
+    if axis is None:
+        divisor = cond(x) + eps
+        return data / divisor
+
+    divisor = cond(x, axis=axis, keepdims=True) + eps
+    return data / divisor
+
+
 
 
 def linecut(data, p0, p1, width=1, dl=1, dw=1, kind='linear',
