@@ -1736,9 +1736,9 @@ def normalize(data, axis=None, condition='mean', eps=1e-12, magnitude=False):
         axis      - Optional : Axis or axes along which to normalize.
                                If None, normalize whole array.
                                Examples:
-                                 axis=0       -> normalize along rows
-                                 axis=1       -> normalize along columns
-                                 axis=(-2,-1) -> normalize each 2D image (for stacks shaped N,H,W)
+                                 axis=0       -> treat each column/momentum individually
+                                 axis=1       -> treat each row/frequency individually
+                                 axis=(-2,-1) -> treat each 2D image (for stacks shaped N,H,W) individually
                                  axis=None    -> global normalization
         condition - Optional : Normalization function.
                                Options: 'max', 'min', 'mean', 'l2'
