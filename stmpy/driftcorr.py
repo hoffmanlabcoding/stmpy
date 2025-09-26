@@ -961,7 +961,8 @@ def __update_parameters(obj, a0=None, bp=None, pixels=None, size=None, use_a0=Tr
 
 #1 - findBraggs
 def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=None, r=None,
-                 w=None, mask3=None, even_out=False, precise=False, 
+                 w=None, mask3=None, exclude_border=True, num_peaks=10**18,
+                 even_out=False, precise=False, 
                  width=10, p0=None, show=False, obj=None, update_obj=False):
     '''
     Find Bragg peaks in the unit of pixels of topo or FT pattern A using peak_local_max. If obj is offered,
@@ -996,6 +997,8 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=None, r=None,
     History:
         04/28/2017      JG : Initial commit.
         04/29/2019      RL : Add maskon option, add outAll option, and add documents.
+        08/21/2025      ZM: Add option to crop edges in FFT plots
+        09/26/2025      ZM: Add option to include Bragg peaks in the border and limit the number of peaks
 
     '''
 
@@ -1006,7 +1009,7 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=None, r=None,
     # Remove low-q high intensity data with multiple masks
     *_, Y, X = np.shape(A)
     
-        
+    print('haha')
     if r is not None:
         Lx = X * r
         Ly = Y * r
@@ -1034,7 +1037,7 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=None, r=None,
         F[:, :crop_n] = 0                  # Left edge
         F[:, -crop_n:] = 0                 # Right edge
         
-    coords = peak_local_max(F, min_distance=min_dist, threshold_rel=thres)
+    coords = peak_local_max(F, min_distance=min_dist, threshold_rel=thres, exclude_border=exclude_border, num_peaks=num_peaks)
     coords = np.fliplr(coords)
 
     # This part is to make sure the Bragg peaks are located at even number of pixels

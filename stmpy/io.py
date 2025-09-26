@@ -589,6 +589,7 @@ def load_3ds(filePath):
     fileObj.close()
 
     LIYNames =  ['LIY 1 omega (A)', 'LIY 1 omega [AVG] (A)', 'LI Demod 1 Y (A)', 'LI Demod 2 Y (A)','LI Demod 3 Y (A)']
+    
     if _make_attr(self, 'LIY', LIYNames, 'grid'):
         self.didv = np.mean(self.LIY, axis=(1,2))
         self.didvStd = np.std(self.LIY, axis=(1,2))
@@ -904,6 +905,7 @@ def load_sm4(filePath):
         2020-07-15  - WT : Initial commit.
         2022-03-02  - KH: include try-except statement to warn user in case 
                             RHK-SM4 package is not installed.
+        2025-09-26  - ZM: Added fix for LIY channel name variations and dimension fix.
       
     '''
     
@@ -946,11 +948,31 @@ def load_sm4(filePath):
     def getf(channel):
         res = 100
         for key in label: 
+            # print("haha")
+            # print(key, label[key])
             if(label[key] == channel): 
                 res = list(label.values()).index(channel) 
         return(res)
-                       
-    liy = getf('LINELIA Current')
+
+    def ensure_square(data, order='C'):
+        arr = np.asarray(data)
+        if arr.ndim == 2:
+            n_pixels_flat, depth = arr.shape
+            s = int(np.sqrt(n_pixels_flat))
+            if s * s != n_pixels_flat:
+                raise ValueError(f"First dim {n_pixels_flat} is not a perfect square")
+            data = arr.reshape(s, s, depth, order=order)
+            data = np.moveaxis(data, -1, 0)   # third -> first
+            return data
+
+        raise ValueError(f"data must be 2D or 3D array; got {arr.ndim}D")
+
+                      
+    liy = getf('LINELIA current')
+    if liy == 100:
+        liy = getf('LINELIA Current')
+    # print(liy)
+    # print('-----')
     i = getf('LINECurrent')
     z = getf('IMAGETopography')
         
@@ -963,14 +985,18 @@ def load_sm4(filePath):
     if _make_attr(self, 'LIY', [liy], 'data'):
         self.didv = np.mean(self.LIY, axis=0)
         self.didvStd = np.std(self.LIY, axis=0)
+        self.LIY = ensure_square(self.LIY)
     else:
         print('ERR: LIY channel not found')
-        
+    
+
     if _make_attr(self, 'I', [i], 'data'):
         self.iv = np.mean(self.I,  axis=0)
+        self.I = ensure_square(self.I)
     else:
         print('ERR: Current not found')
-                  
+    
+
     if _make_attr(self, 'Z', [z], 'data'):
         self.Z = self.Z
     else:
