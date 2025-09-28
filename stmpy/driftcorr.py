@@ -1791,6 +1791,7 @@ def display(*args, sigma=3, clim_same=True):
 def display_transpose(*args, sigma=3, clim_same=True):
     '''
     Display or compare images in both real space and q-space.
+    Just like "display" but shows images top and bottom instead of side by side.
 
     Inputs:
         *args       - Required : Any number of real space images to display.
@@ -1803,7 +1804,7 @@ def display_transpose(*args, sigma=3, clim_same=True):
 
     Usage:
         import stmpy.driftcorr as dfc
-        dfc.display(topo.z)
+        dfc.display_transpose(topo.z)
     '''
     fft_images = [stmpy.tools.fft(A, zeroDC=True) for A in args]
     if clim_same:
