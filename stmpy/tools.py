@@ -516,7 +516,7 @@ def GMKhexagon(br, s, ec='k', lw=1):
                                   closed=True, fill=None, ec=ec, lw=lw)
     return G, M, K, hexagon
 
-def symmetrize(data, n, bp=(1.,1.), mirrorOnly=False, diag=False):
+def symmetrize(data, n, bp=(1.,1.), mirrorOnly=False, diag=False, rotate_mode='constant', cval=None):
     '''
     Applies n-fold symmetrization to the image by rotating clockwise and
     anticlockwise by an angle 2pi/n, then applying a mirror line.  Works on 2D
@@ -541,33 +541,54 @@ def symmetrize(data, n, bp=(1.,1.), mirrorOnly=False, diag=False):
         2017-06-05  - HP : Modified default bp-value to be on diagonal.
         2017-08-15  - HP : Added flag to leave mirror line on the diagonal.
                            Code will not line mirror unsquare data.
-        2023-05-25  - RL : Add support for mirror only symmetrize 
+        2023-05-25  - RL : Add support for mirror only symmetrize
+        2025-09-12  - DTL: Added ability to change snd.rotate option 'mode'.
+                           Default remains 'constant', but 'nearest' can fix the problem of
+                           mismatched small values at the corners. However, can introduce other
+                           artifacts at the corners.
+        2025-09-28  - DTL: Added 'cval' flag to set constant value to fill when rotating.
+                           The value can be given directly, or None yields the default (0.0), 
+                           while 'auto' uses the average value around the perimeter.
+                           
      '''
     def sym2d(F, n):
         angle = 360.0/n
         out = np.zeros_like(F)
+        if cval == 'auto':
+            fill_const =  (F[[0,-1],:].mean() + F[:,[0,-1]].mean())/2
+        elif type(cval) in (float, int):
+            fill_const = cval
+        else:
+            fill_const = 0.0
         for ix in range(n):
-            out += snd.rotate(F, angle*ix, reshape=False)
-            out += snd.rotate(F, -angle*ix, reshape=False)
+            out += snd.rotate(F, angle*ix, reshape=False, mode=rotate_mode, cval=fill_const)
+            out += snd.rotate(F, -angle*ix, reshape=False, mode=rotate_mode, cval=fill_const)
         out /= 2*n
         return out
 
     def linmirr(F, x1, y1):
+        if cval == 'auto':
+            fill_const =  (F[[0,-1],:].mean() + F[:,[0,-1]].mean())/2
+        elif type(cval) in (float, int):
+            fill_const = cval
+        else:
+            fill_const = 0.0
         x0 = int(F.shape[0]/2.)
         y0 = int(F.shape[1]/2.)
         if x0 == y0:
             # angle between mirror line and diagonal line, unit in rad
             alpha = 3*np.pi/4-np.arctan((y1-y0)/(x1-x0))
             # rotate the mirror line to be diagonal
-            Fr = snd.rotate(F, -alpha/np.pi*180, reshape=False)
+            Fr = snd.rotate(F, -alpha/np.pi*180, reshape=False, mode=rotate_mode, cval=fill_const)
             Ff = Fr.T # diagnoal mirror
             if diag:
                 return (Ff+Fr)/2.0
             else:
-                Ffr = snd.rotate(Ff, alpha/np.pi*180, reshape=False) # rotate back
+                Ffr = snd.rotate(Ff, alpha/np.pi*180, reshape=False, mode=rotate_mode, cval=fill_const) # rotate back
                 return (Ffr+F)/2.0
         else:
             return F
+       
     p = np.array(bp, dtype=np.float64)
     if len(data.shape) is 2:
         if mirrorOnly == False:
