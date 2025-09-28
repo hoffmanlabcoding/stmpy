@@ -1791,7 +1791,7 @@ def display(*args, sigma=3, clim_same=True):
 def display_transpose(*args, sigma=3, clim_same=True):
     '''
     Display or compare images in both real space and q-space.
-    Just like "display" but shows images top and bottom instead of side by side.
+    Just like "display" but shows real and q-space top and bottom instead of side by side.
 
     Inputs:
         *args       - Required : Any number of real space images to display.
