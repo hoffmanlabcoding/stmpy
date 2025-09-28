@@ -1788,6 +1788,49 @@ def display(*args, sigma=3, clim_same=True):
             ax[0].set_aspect(1)
             ax[1].set_aspect(1)
 
+def display_transpose(*args, sigma=3, clim_same=True):
+    '''
+    Display or compare images in both real space and q-space.
+
+    Inputs:
+        *args       - Required : Any number of real space images to display.
+        sigma       - Optional : sigma for the color limit.
+        clim_same   - Optional : If True, then the FT of the images will be displayed under the
+                                    same color limit (determined by the first image).
+
+    Returns:
+        N/A
+
+    Usage:
+        import stmpy.driftcorr as dfc
+        dfc.display(topo.z)
+    '''
+    fft_images = [stmpy.tools.fft(A, zeroDC=True) for A in args]
+    if clim_same:
+        c, s = np.mean(fft_images[0]), np.std(fft_images[0])
+        global_clim = (c, s)
+
+    # Define the subplot grid
+    fig, ax = plt.subplots(2, len(args), figsize=[4*len(args), 8])
+
+    for i, A in enumerate(args):
+        A_fft = stmpy.tools.fft(A, zeroDC=True)
+        c, s = global_clim if clim_same else (np.mean(A_fft), np.std(A_fft))
+        
+        # Adjust for multiple or single subplots
+        if len(args) > 1:
+            ax[0, i].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+            ax[1, i].imshow(A_fft, cmap=stmpy.cm.gray_r,
+                            origin='lower', clim=[0, c+sigma*s])
+            ax[0, i].set_aspect(1)
+            ax[1, i].set_aspect(1)
+        else:
+            ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+            ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r,
+                        origin='lower', clim=[0, c+sigma*s])
+            ax[0].set_aspect(1)
+            ax[1].set_aspect(1)
+            
 
 def quick_linecut(A, width=2, n=4, bp=None, ax=None, thres=3):
     """
