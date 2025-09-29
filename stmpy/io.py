@@ -1002,7 +1002,7 @@ def load_sm4(filePath):
     else:
         print('ERR: Z channel not found')
     
-    n_pixels = self.header[0]['Xsize'] * 1e9 # in nm
+    n_pixels = self.header[0]['Xsize'] 
     scan_size = self.header[0]['Xscale']*self.header[0]['Xscale']*n_pixels # in nm
     set_current = self.header[0]['Current']*1e12 # in pA
     set_voltage = self.header[0]['Bias'] # in V
