@@ -906,7 +906,7 @@ def load_sm4(filePath):
         2022-03-02  - KH: include try-except statement to warn user in case 
                             RHK-SM4 package is not installed.
         2025-09-26  - ZM: Added fix for LIY channel name variations and dimension fix.
-      
+        2025-09-29  - ZM: Added scan_info dictionary to store n_pixels, scan_size, set_current, set_voltage
     '''
     
     try: 
@@ -1001,6 +1001,19 @@ def load_sm4(filePath):
         self.Z = self.Z
     else:
         print('ERR: Z channel not found')
+    
+    n_pixels = self.header[0]['Xsize'] * 1e9 # in nm
+    scan_size = self.header[0]['Xscale']*self.header[0]['Xscale']*n_pixels # in nm
+    set_current = self.header[0]['Current']*1e12 # in pA
+    set_voltage = self.header[0]['Bias'] # in V
+
+    self.scan_info = {
+        'n_pixels': n_pixels,
+        'scan_size': scan_size,
+        'set_current': set_current,
+        'set_voltage': set_voltage
+    }
+
     return self
 
 
