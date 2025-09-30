@@ -397,6 +397,7 @@ def add_scale_bar(length, imgsize, imgpixels, barheight=1.5e-2, ax=None, unit='n
 
     if ax is None:
         ax = mpl.pyplot.gca()
+    
     to_distance = imgsize/imgpixels
     fontprops = fm.FontProperties(size=fs)
     if tex:
@@ -419,7 +420,6 @@ def add_scale_bar(length, imgsize, imgpixels, barheight=1.5e-2, ax=None, unit='n
             fontproperties=fontprops,
             **kwargs
             )
-
     ax.add_artist(scalebar)
     return scalebar
 
