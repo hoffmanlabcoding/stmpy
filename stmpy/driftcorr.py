@@ -961,7 +961,8 @@ def __update_parameters(obj, a0=None, bp=None, pixels=None, size=None, use_a0=Tr
 
 #1 - findBraggs
 def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=None, r=None,
-                 w=None, mask3=None, exclude_border=True, num_peaks=10**18,
+                 w=None, mask3=None, 
+                 exclude_border=True, num_peaks=10**18,
                  even_out=False, precise=False, 
                  width=10, p0=None, show=False, obj=None, update_obj=False):
     '''
