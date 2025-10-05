@@ -8,6 +8,7 @@ import numpy as np
 import scipy as sp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import scipy.optimize as opt
 import scipy.ndimage as snd
 from scipy.interpolate import interp1d, RectBivariateSpline
@@ -120,9 +121,16 @@ def check_bp(A, bp, obj=None):
     '''
     center = (np.array(np.shape(A)[::-1])-1) // 2
     Q = bp-center
+    angles = np.degrees(np.arctan2(Q[:, 1], Q[:, 0]))
+    angles_diff = angles - angles[0]
+    print("------------------------")
+    print("The coordinates of the Q vectors are (in pixels):")
     print(Q)
-    print(np.dot(Q[0], Q[1]))
-
+    print("The angles of the Q vectors are (in degrees): [" +
+        ", ".join(f"{x:.2f}" for x in angles) + "]")
+    print("The angle differences are (in degrees): [" +
+        ", ".join(f"{x:.2f}" for x in angles_diff) + "]")
+    print("------------------------")
 
 def __even_bp(bp, s):
     '''
@@ -247,12 +255,15 @@ def __global_corr(A, bp=None, show=False, angle=np.pi/4, **kwargs):
     else:
         bp_1 = bp
     m, data_1 = gshearcorr(A, bp_1, rspace=True, angle=angle, **kwargs)
+
     if show is True:
         fig, ax = plt.subplots(1, 2, figsize=[8, 4])
         ax[0].imshow(data_1, cmap=stmpy.cm.blue2, origin='lower')
         ax[0].set_xlim(0, s1)
         ax[0].set_ylim(0, s2)
-        ax[1].imshow(stmpy.tools.fft(data_1, zeroDC=True),
+        Fdata_1 = stmpy.tools.fft(data_1, zeroDC=True)
+        clim = [0, np.mean(Fdata_1)+3*np.std(Fdata_1)]
+        ax[1].imshow(Fdata_1,clim=clim,
                      cmap=stmpy.cm.gray_r, origin='lower')
         fig.suptitle('After global shear correction', fontsize=14)
         fig, ax = plt.subplots(2, 2, figsize=[8, 8])
@@ -326,20 +337,21 @@ def __local_corr(A, bp=None, sigma=10, method="lockin", fixMethod='unwrap', show
         bp_2 = findBraggs(A, thres=0.2, show=show)
     else:
         bp_2 = bp
-    thetax, thetay, Q1, Q2 = phasemap(A, bp=bp_2, method=method, sigma=sigma)
+    theta1, theta2, Q1, Q2 = phasemap(A, bp=bp_2, method=method, sigma=sigma)
     if show is True:
         fig, ax = plt.subplots(1, 2, figsize=[8, 4])
-        ax[0].imshow(thetax, origin='lower')
-        ax[1].imshow(thetay, origin='lower')
+        ax[0].imshow(theta1, origin='lower')
+        ax[1].imshow(theta2, origin='lower')
         fig.suptitle('Raw phase maps')
-    thetaxf = fixphaseslip(thetax, method=fixMethod)
-    thetayf = fixphaseslip(thetay, method=fixMethod)
+    theta1f = fixphaseslip(theta1, method=fixMethod)
+    theta2f = fixphaseslip(theta2, method=fixMethod)
     if show is True:
         fig, ax = plt.subplots(1, 2, figsize=[8, 4])
-        ax[0].imshow(thetaxf, origin='lower')
-        ax[1].imshow(thetayf, origin='lower')
+        ax[0].imshow(theta1f, origin='lower')
+        ax[1].imshow(theta2f, origin='lower')
         fig.suptitle('After fixing phase slips')
-    ux, uy = driftmap(thetaxf, thetayf, Q1, Q2, method=method)
+
+    ux, uy = driftmap(theta1f, theta2f, Q1, Q2, method=method)
     if method == 'lockin':
         data_corr = driftcorr(A, ux, uy, method='lockin',
                               interpolation='cubic')
@@ -525,8 +537,8 @@ def gshearcorr(A, bp=None, rspace=True, pts1=None, pts2=None, angle=np.pi/4, ori
 ######################### Wrapped functions for easy use #########################
 ##################################################################################      
         
-def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp_angle=None, orient=None, bp_c=None,\
-                sigma=10, method='lockin', even_out=False, show=True, **kwargs):
+def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp_pick=(0,1), bp_angle=None, orient=None, bp_c=None,\
+                sigma=10, method='lockin', even_out=False, fixphaseslip_method="unwrap", show=True, A_unit=None, **kwargs):
     '''
     This method find drift parameters from a 2D map automatically.
 
@@ -564,6 +576,7 @@ def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp
         06/23/2020  - RL : Initial commit.
     '''
     p = {}
+    print(A_unit)
     if cut1 is not None:
         A = cropedge_new(A, n=cut1)
 
@@ -586,16 +599,47 @@ def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp
             if orient is None:
                 orient = np.arctan2(*Q[0][::-1])
         # Calculate the correction position of each Bragg peak
-        bp_c = generate_bp(A, bp1, angle=bp_angle, orient= orient, even_out=even_out)
+        print('The original angle between neighboring Bragg peaks is %.2f degrees.' % (np.mean(angles)*180/np.pi))
+        print('The angle between neighboring Bragg peaks is set to be %.2f degrees.' % (bp_angle*180/np.pi))
+        bp_c = generate_bp(A, bp1, bp_pick=bp_pick, angle=bp_angle, orient= orient, even_out=even_out)
+    
+        print('The correct Bragg peak positions are set to be:')
+        print(bp_c)
+
+        fig, ax = plt.subplots(1, 2, figsize=[8, 4])
+        ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+        A_fft = stmpy.tools.fft(A, zeroDC=True)
+        clim = [0, np.mean(A_fft)+3*np.std(A_fft)]
+        ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=clim)
+        ax[0].set_aspect('equal')
+        ax[1].set_aspect('equal')
+        # Bragg peak 1
+        bp_c_pair1 = bp_c[[0, 2]]
+        bp_c_pair2 = bp_c[[1, 3]]
+        # filled, slightly transparent red dots
+        ax[1].scatter(*bp_c_pair1.T, s=30, c='blue', alpha=0.5, label='Q_1')
+        ax[1].scatter(*bp_c_pair2.T, s=30, c='orange', alpha=0.5, label='Q_2')
+        ax[1].plot(*bp1.T, 'g+', markersize=12, label='Original Bragg peaks')
+        ax[1].legend()
+
     else:
         bp1 = bp_c
-    
-    # Find the phasemap 
-    thetax, thetay, Q1, Q2 = phasemap(A, bp=bp_c, method=method, sigma=sigma)
 
-    phix = fixphaseslip(thetax, method='unwrap')
-    phiy = fixphaseslip(thetay, method='unwrap')
-    ux, uy = driftmap(phix, phiy, Q1, Q2, method=method)
+    # Find the phasemap 
+    theta1, theta2, Q1, Q2, A1, A2, psi1, psi2 = phasemap(A, bp=bp_c, method=method, sigma=sigma, return_amp=True, return_complex=True)
+
+    phi1 = fixphaseslip(theta1, method=fixphaseslip_method)
+    phi2 = fixphaseslip(theta2, method=fixphaseslip_method)
+    print('Q1, Q2:', Q1, Q2)
+    ux, uy = driftmap(phi1, phi2, Q1, Q2, method=method)
+    # strain map
+    exx, eyy, exy = strainmap(ux, uy, Q1, Q2)
+    # exx, eyy, exy, rot, eps_h, eps_s, extra = gpa_strain_from_carriers(
+    # Q1, Q2, psi1, psi2, amp_pct=12, return_all=True
+# )
+    # after your GPA (unwrap-free or unwrapped) you have exx, eyy, exy and Q1, Q2:
+    e11, e22, e12 = strain_along_lattice(exx, eyy, exy, Q1, Q2)
+
     z_temp = driftcorr(A, ux, uy, method=method, interpolation='cubic')
     
     # This part interpolates the drift corrected maps
@@ -604,16 +648,92 @@ def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp
     else:
         bp3 = findBraggs(z_temp, r=r, w=w, mask3=mask3, **kwargs)
         z_c = cropedge_new(z_temp, n=cut2, bp=bp3, force_commen=True)
+        A1 = cropedge_new(A1, n=cut2)
+        A2 = cropedge_new(A2, n=cut2)
+        phi1 = cropedge_new(phi1, n=cut2)
+        phi2 = cropedge_new(phi2, n=cut2)
+        ux = cropedge_new(ux, n=cut2)
+        uy = cropedge_new(uy, n=cut2)
+        exx = cropedge_new(exx, n=cut2)
+        eyy = cropedge_new(eyy, n=cut2)
+        exy = cropedge_new(exy, n=cut2)
+        e11 = cropedge_new(e11, n=cut2)
+        e22 = cropedge_new(e22, n=cut2)
+        e12 = cropedge_new(e12, n=cut2)
+
         p['bp3'] = bp3
     
     # This part displays the intermediate maps in the process of drift correction
     if show is True:
-        fig, ax = plt.subplots(1, 2, figsize=[8, 4])
-        c = np.mean(phix)
-        s = np.std(phix)
-        fig.suptitle('Phasemaps after fixing phase slips:')
-        ax[0].imshow(phix, origin='lower', clim=[c-5*s, c+5*s])
-        ax[1].imshow(phiy, origin='lower', clim=[c-5*s, c+5*s])
+        fig, ax = plt.subplots(2, 7, figsize=[15, 5])
+        c = np.mean(phi1)
+        s = np.std(phi1)
+        if A_unit is None:
+            A_unit = 'a.u.'
+            A_unit_scale = 1
+        elif A_unit == 'pm':
+            A_unit = 'pm'
+            A_unit_scale = 1e12
+        ax[0,0].imshow(A1*A_unit_scale, origin='lower', clim=[0, np.percentile(A1*A_unit_scale, 95)])
+        ax[0,0].set_title(r'Amplitude $A_{1}$', fontsize=10)
+        ax[1,0].imshow(A2*A_unit_scale, origin='lower', clim=[0, np.percentile(A2*A_unit_scale, 95)])
+        ax[1,0].set_title(r'Amplitude $A_{2}$', fontsize=10)
+        stmpy.image.add_colorbar(ax=ax[0,0], loc=0, label=A_unit, fs=8)
+        stmpy.image.add_colorbar(ax=ax[1,0], loc=0, label=A_unit, fs=8)
+
+        ax[0,1].imshow(theta1, origin='lower', clim=[-np.pi, np.pi])
+        # latex style for theta
+        ax[0,1].set_title(r'Phase $\theta_{1}$', fontsize=10)
+        ax[1,1].imshow(theta2, origin='lower', clim=[-np.pi, np.pi])
+        ax[1,1].set_title(r'Phase $\theta_{2}$', fontsize=10)
+        stmpy.image.add_colorbar(ax=ax[0,1], loc=0, label='rad', fs=8)
+        stmpy.image.add_colorbar(ax=ax[1,1], loc=0, label='rad', fs=8)
+
+        ax[0,2].imshow(phi1, origin='lower', clim=[np.percentile(phi1, 5), np.percentile(phi1, 95)])
+        ax[0,2].set_title(r'Unwrapped phase $\phi_{1}$', fontsize=10)
+        ax[1,2].imshow(phi2, origin='lower', clim=[np.percentile(phi2, 5), np.percentile(phi2, 95)])
+        ax[1,2].set_title(r'Unwrapped phase $\phi_{2}$', fontsize=10)
+        stmpy.image.add_colorbar(ax=ax[0,2], loc=0, label='rad', fs=8)
+        stmpy.image.add_colorbar(ax=ax[1,2], loc=0, label='rad', fs=8)
+        ax[0,3].imshow(ux, origin='lower', clim=[np.percentile(ux, 5), np.percentile(ux, 95)])
+        ax[0,3].set_title(r'Displacement $u_{x}$', fontsize=10)
+        ax[1,3].imshow(uy, origin='lower', clim=[np.percentile(uy, 5), np.percentile(uy, 95)])
+        ax[1,3].set_title(r'Displacement $u_{y}$' , fontsize=10)
+
+
+        from matplotlib.colors import TwoSlopeNorm
+
+        # one common limit so colors are comparable across plots
+        v = max(np.nanmax(np.abs(exx)),
+                np.nanmax(np.abs(eyy)),
+                np.nanmax(np.abs(e11)),
+                np.nanmax(np.abs(e22)))
+
+        norm = TwoSlopeNorm(vmin=-v, vcenter=0.0, vmax=v)
+
+        ax[0,4].imshow(exx, origin='lower', cmap='RdBu', norm=norm)
+        ax[0,4].set_title(r'Strain map $\epsilon_{xx}$', fontsize=10)
+        ax[0,5].imshow(eyy, origin='lower', cmap='RdBu', norm=norm)
+        ax[0,5].set_title(r'Strain map $\epsilon_{yy}$', fontsize=10)
+        ax[0,6].imshow(exy, origin='lower', cmap='RdBu', norm=norm)
+        ax[0,6].set_title(r'Shear map $\epsilon_{xy}$', fontsize=10)
+
+        ax[1,4].imshow(e11, origin='lower', cmap='RdBu', norm=norm)
+        ax[1,4].set_title(r'Strain map $\epsilon_{11}$', fontsize=10)
+        ax[1,5].imshow(e22, origin='lower', cmap='RdBu', norm=norm)
+        ax[1,5].set_title(r'Strain map $\epsilon_{22}$', fontsize=10)
+        ax[1,6].imshow(e12, origin='lower', cmap='RdBu', norm=norm)
+        ax[1,6].set_title(r'Shear map $\epsilon_{12}$', fontsize=10)
+
+        stmpy.image.add_colorbar(ax=ax[0,3], loc=0, label='pixels', fs=8)
+        stmpy.image.add_colorbar(ax=ax[1,3], loc=0, label='pixels', fs=8)
+        for i in range(4, 7):
+            stmpy.image.add_colorbar(ax=ax[0,i], loc=0, label='strain', fs=8)
+            stmpy.image.add_colorbar(ax=ax[1,i], loc=0, label='strain', fs=8)
+
+        for ax in ax.flatten():
+            ax.axis('off')
+            ax.set_aspect('equal')
         
         A_fft = stmpy.tools.fft(A, zeroDC=True)
         B_fft = stmpy.tools.fft(z_c, zeroDC=True)
@@ -623,13 +743,16 @@ def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp
         c2 = np.mean(A)
         s2 = np.std(A)
 
-        fig, ax = plt.subplots(2, 2, figsize=[8, 8])
+        fig, ax = plt.subplots(1, 4, figsize=[12, 3])
         fig.suptitle('Maps before and after drift correction:')
-        ax[0,0].imshow(A, cmap=stmpy.cm.blue2, origin='lower', clim=[c2-5*s2, c2+5*s2])
-        ax[0,1].imshow(A_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c1+5*s1])
-        ax[1,0].imshow(z_c, cmap=stmpy.cm.blue2, origin='lower', clim=[c2-5*s2, c2+5*s2])
-        ax[1,1].imshow(B_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c1+5*s1])
-    
+        ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower', clim=[c2-5*s2, c2+5*s2])
+        ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c1+5*s1])
+        ax[2].imshow(z_c, cmap=stmpy.cm.blue2, origin='lower', clim=[c2-5*s2, c2+5*s2])
+        ax[3].imshow(B_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c1+5*s1])
+        for ax in ax.flatten():
+            ax.axis('off')
+            ax.set_aspect('equal')
+            
     p['cut1'] = cut1
     p['cut2'] = cut2
     p['r'] = r
@@ -642,11 +765,14 @@ def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp
     p['bp_angle'] = bp_angle
     p['orient'] = orient
     p['bp1'] = bp1
-    p['phix'] = phix
-    p['phiy'] = phiy
+    p['phi1'] = phi1
+    p['phi2'] = phi2
     p['ux'] = ux
     p['uy'] = uy
-
+    p['exx'] = exx
+    p['eyy'] = eyy
+    p['e11'] = e11
+    p['e22'] = e22
     return z_c, p
 
 def apply_drift_parameter(A, p, **kwargs):
@@ -842,11 +968,11 @@ def find_drift(self, A, r=None, w=None, mask3=None, cut1=None, cut2=None, \
                             even_out=self.parameters['even_out'], obj=self)
     
     # This part corrects for the drift 
-    thetax, thetay, Q1, Q2 = phasemap(A, bp=self.bp2, method=method, sigma=sigma)
+    theta1, theta2, Q1, Q2 = phasemap(A, bp=self.bp2, method=method, sigma=sigma)
 
-    self.phix = fixphaseslip(thetax, method='unwrap')
-    self.phiy = fixphaseslip(thetay, method='unwrap')
-    self.ux, self.uy = driftmap(self.phix, self.phiy, Q1, Q2, method=method)
+    self.phi1 = fixphaseslip(theta1, method='unwrap')
+    self.phi2 = fixphaseslip(theta2, method='unwrap')
+    self.ux, self.uy = driftmap(self.phi1, self.phi2, Q1, Q2, method=method)
     ztemp = driftcorr(A, self.ux, self.uy, method=method, interpolation='cubic')
     
     # This part interpolates the drift corrected maps
@@ -862,11 +988,11 @@ def find_drift(self, A, r=None, w=None, mask3=None, cut1=None, cut2=None, \
     # This part displays the intermediate maps in the process of drift correction
     if show is True:
         fig, ax = plt.subplots(1, 2, figsize=[8, 4])
-        c = np.mean(self.phix)
-        s = np.std(self.phix)
+        c = np.mean(self.phi1)
+        s = np.std(self.phi1)
         fig.suptitle('Phasemaps after fixing phase slips:')
-        ax[0].imshow(self.phix, origin='lower', clim=[c-5*s, c+5*s])
-        ax[1].imshow(self.phiy, origin='lower', clim=[c-5*s, c+5*s])
+        ax[0].imshow(self.phi1, origin='lower', clim=[c-5*s, c+5*s])
+        ax[1].imshow(self.phi2, origin='lower', clim=[c-5*s, c+5*s])
         
         A_fft = stmpy.tools.fft(A, zeroDC=True)
         B_fft = stmpy.tools.fft(self.zc, zeroDC=True)
@@ -960,9 +1086,9 @@ def __update_parameters(obj, a0=None, bp=None, pixels=None, size=None, use_a0=Tr
 ##################################################################################
 
 #1 - findBraggs
-def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=None, r=None,
+def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=0, r=None,
                  w=None, mask3=None, 
-                 exclude_border=True, num_peaks=10**18,
+                 exclude_border=False, num_peaks=10**18,
                  even_out=False, precise=False, 
                  width=10, p0=None, show=False, obj=None, update_obj=False):
     '''
@@ -1000,7 +1126,7 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=None, r=None,
         04/29/2019      RL : Add maskon option, add outAll option, and add documents.
         08/21/2025      ZM: Add option to crop edges in FFT plots
         09/26/2025      ZM: Add option to include Bragg peaks in the border and limit the number of peaks
-
+        10/04/2025      ZM: Remove the flip in y direction to be consistent with other functions
     '''
 
     if rspace is True:
@@ -1010,7 +1136,7 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=None, r=None,
     # Remove low-q high intensity data with multiple masks
     *_, Y, X = np.shape(A)
     
-    print('haha')
+
     if r is not None:
         Lx = X * r
         Ly = Y * r
@@ -1032,7 +1158,7 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=None, r=None,
         mask3 = mask_bp(A, p=mask3)
     F *= G * mask2 * mask3
 
-    if crop_n is not None:
+    if crop_n > 0:
         F[:crop_n, :] = 0                  # Top edge
         F[-crop_n:, :] = 0                 # Bottom edge
         F[:, :crop_n] = 0                  # Left edge
@@ -1056,9 +1182,9 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=None, r=None,
             coords[i][1] += popt[2] - width
 
     # This part shows the Bragg peak positions
-    if show is not False:
+    if show:
         plt.figure(figsize=[4, 4])
-        if crop_n is not None:
+        if crop_n > 0 :
             c = np.mean(F[crop_n:-crop_n, crop_n:-crop_n])
             s = np.std(F[crop_n:-crop_n, crop_n:-crop_n])
         else:
@@ -1071,10 +1197,10 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=None, r=None,
         plt.gca().set_aspect(1)
         plt.axis('tight')
 
-        if crop_n is not None:
+        if crop_n > 0:
             height, width = F.shape
             plt.xlim(crop_n, width - crop_n)
-            plt.ylim(height - crop_n, crop_n)  # Y-axis is flipped in imshow
+            plt.ylim(crop_n, height - crop_n)  
             
         center = (np.array(np.shape(A)[::-1])-1) // 2
         print('The coordinates of the Bragg peaks are:')
@@ -1165,6 +1291,7 @@ def cropedge_new(A, n, bp=None, c1=2, c2=2,
     History:
         06/04/2019      RL : Initial commit.
         11/30/2019      RL : Add support for non-square dataset
+        10/03/2025      ZM : Removed the transpose bug. (not sure if it is a bug)
     """
 
     if not isinstance(n, list):
@@ -1200,14 +1327,14 @@ def cropedge_new(A, n, bp=None, c1=2, c2=2,
         t1 = np.arange(L1)
         t2 = np.arange(L2)
         if len(np.shape(A)) == 2:
-            f = RectBivariateSpline(t1, t2, B.T, kx=3, ky=3) # transposed vs interp2d, and defining cubic w/ kx=ky=3
+            f = RectBivariateSpline(t1, t2, B, kx=3, ky=3) 
             t_new1 = np.linspace(0, L_new1, num=L1+1)
             t_new2 = np.linspace(0, L_new2, num=L2+1)
             z_new = f(t_new1[:-1], t_new2[:-1])
         elif len(np.shape(A)) == 3:
             z_new = np.zeros([np.shape(A)[0], L2, L1])
             for i in range(len(A)):
-                f = RectBivariateSpline(t1, t2, B[i].T, kx=3, ky=3)
+                f = RectBivariateSpline(t1, t2, B[i], kx=3, ky=3)
                 t_new1 = np.linspace(0, L_new1, num=L1+1)
                 t_new2 = np.linspace(0, L_new2, num=L2+1)
                 z_new[i] = f(t_new1[:-1], t_new2[:-1])
@@ -1314,27 +1441,28 @@ def __cropedge(A, n, bp=None, c1=2, c2=2, a1=None, a2=None, force_commen=False):
         return z_new
 
 # 4. phasemap
-def phasemap(A, bp, sigma=10, method="lockin"):
+def phasemap(A, bp, sigma=10, method="lockin", return_amp=False, return_complex=False):
     '''
     Calculate local phase and phase shift maps. Two methods are available now: spatial lockin or Gaussian mask convolution
 
     Input:
         A           - Required : 2D arrays after global shear correction with bad pixels cropped on the edge
-        bp          - Required : Coords of Bragg peaks of FT(A), can be computed by findBraggs(A)
+        bp          - Required : Coords of Bragg peaks of FT(A), can be computed by findBraggs(A) (Bragg peak indexs in pixels)
         sigma       - Optional : width of DC filter in lockin method or len(A)/s
         method      - Optional : Specify which method to use to calculate phase map.
                                 "lockin": Spatial lock-in method to find phase map
                                 "convolution": Gaussian mask convolution method to find phase map
 
     Returns:
-        thetax      -       2D array, Phase shift map in x direction, relative to perfectly generated cos lattice
-        thetay      -       2D array, Phase shift map in y direction, relative to perfectly generated cos lattice
-        Q1          -       Coordinates of 1st Bragg peak
-        Q2          -       Coordinates of 2nd Bragg peak
+        theta1      -       2D array, Phase shift map in x direction, relative to perfectly generated cos lattice
+        theta2      -       2D array, Phase shift map in y direction, relative to perfectly generated cos lattice
+        Q1          -       Coordinates of 1st Bragg peak (in rad per pixel)
+        Q2          -       Coordinates of 2nd Bragg peak (in rad per pixel)
+
 
     Usage:
         import stmpy.driftcorr as dfc
-        thetax, thetay, Q1, Q2 = dfc.phasemap(A, bp, sigma=10, method='lockin')
+        theta1, theta2, Q1, Q2 = dfc.phasemap(A, bp, sigma=10, method='lockin')
 
     History:
         04/28/2017      JG : Initial commit.
@@ -1350,7 +1478,7 @@ def phasemap(A, bp, sigma=10, method="lockin"):
     else:
         sigmax, sigmay, *_ = sigma
     s = np.minimum(s1, s2)
-    bp = sortBraggs(bp, s=np.shape(A))
+    # bp = sortBraggs(bp, s=np.shape(A))
     t1 = np.arange(s1, dtype='float')
     t2 = np.arange(s2, dtype='float')
     x, y = np.meshgrid(t1, t2)
@@ -1359,17 +1487,26 @@ def phasemap(A, bp, sigma=10, method="lockin"):
     Q2 = 2*np.pi*np.array([(bp[1][0]-int((s1-1)/2))/s1,
                            (bp[1][1]-int((s2-1)/2))/s2])
     if method is "lockin":
-        Axx = A * np.sin(Q1[0]*x+Q1[1]*y)
-        Axy = A * np.cos(Q1[0]*x+Q1[1]*y)
-        Ayx = A * np.sin(Q2[0]*x+Q2[1]*y)
-        Ayy = A * np.cos(Q2[0]*x+Q2[1]*y)
-        Axxf = FTDCfilter(Axx, sigmax, sigmay)
-        Axyf = FTDCfilter(Axy, sigmax, sigmay)
-        Ayxf = FTDCfilter(Ayx, sigmax, sigmay)
-        Ayyf = FTDCfilter(Ayy, sigmax, sigmay)
-        thetax = np.arctan2(Axxf, Axyf)
-        thetay = np.arctan2(Ayxf, Ayyf)
-        return thetax, thetay, Q1, Q2
+        A1x = A * np.sin(Q1[0]*x+Q1[1]*y)
+        A1y = A * np.cos(Q1[0]*x+Q1[1]*y)
+        A2x = A * np.sin(Q2[0]*x+Q2[1]*y)
+        A2y = A * np.cos(Q2[0]*x+Q2[1]*y)
+        A1xf = FTDCfilter(A1x, sigmax, sigmay)
+        A1yf = FTDCfilter(A1y, sigmax, sigmay)
+        A2xf = FTDCfilter(A2x, sigmax, sigmay)
+        A2yf = FTDCfilter(A2y, sigmax, sigmay)
+
+        # amplitudes (lock-in quadratures → magnitude)
+        A1 = np.hypot(A1xf, A1yf) # same unit as A
+        A2 = np.hypot(A2xf, A2yf) # same unit as A
+
+        theta1 = np.arctan2(A1xf, A1yf)
+        theta2 = np.arctan2(A2xf, A2yf)
+
+        if return_complex:
+            psi1 = A1 * np.exp(1j*theta1)
+            psi2 = A2 * np.exp(1j*theta2)
+
     elif method is "convolution":
         t_x = np.arange(s1)
         t_y = np.arange(s2)
@@ -1391,11 +1528,28 @@ def phasemap(A, bp, sigma=10, method="lockin"):
         T_y = sp.signal.fftconvolve(A_y, G, mode='same',)
         R_x = np.abs(T_x)
         R_y = np.abs(T_y)
-        phi_y = np.angle(T_y)
-        phi_x = np.angle(T_x)
-        return phi_x, phi_y, Q1, Q2
+        theta2 = np.angle(T_y)
+        theta1 = np.angle(T_x)
+
+        A1 = np.abs(T_x)
+        A2 = np.abs(T_y)
+
+        if return_complex:
+            psi1, psi2 = T_x, T_y
+
     else:
         print('Only two methods are available now:\n1. lockin\n2. convolution')
+
+    # assemble returns
+    if return_amp and return_complex:
+        return theta1, theta2, Q1, Q2, A1, A2, psi1, psi2
+    elif return_amp:
+        return theta1, theta2, Q1, Q2, A1, A2
+    elif return_complex:
+        return theta1, theta2, Q1, Q2, psi1, psi2
+    else:
+        return theta1, theta2, Q1, Q2
+    
 
 #5 - fixphaseslip
 def fixphaseslip(A, thres=None, maxval=None, method='unwrap', orient=0):
@@ -1416,7 +1570,7 @@ def fixphaseslip(A, thres=None, maxval=None, method='unwrap', orient=0):
 
     Usage:
         import stmpy.driftcorr as dfc
-        thetaxf = dfc.fixphaseslip(thetax, method='unwrap')
+        theta1f = dfc.fixphaseslip(theta1, method='unwrap')
 
     History:
         04/28/2017      JG : Initial commit.
@@ -1479,51 +1633,200 @@ def unwrap_phase_2d(A, thres=None):
         return output[::-1, ::-1]
 
 #7 - driftmap
-def driftmap(phix=None, phiy=None, Q1=None, Q2=None, method="lockin"):
+def driftmap(phi1=None, phi2=None, Q1=None, Q2=None, method="lockin"):
     '''
     Calculate drift fields based on phase shift maps, with Q1 and Q2 generated by phasemap.
 
     Inputs:
-        phix        - Optional : 2D arrays of phase shift map in x direction with phase slips corrected
-        phiy        - Optional : 2D arrays of phase shift map in y direction with phase slips corrected
-        Q1          - Optional : Coordinates of 1st Bragg peak, generated by phasemap
-        Q2          - Optional : Coordinates of 2nd Bragg peak, generated by phasemap
+        phi1        - Optional : 2D arrays of phase shift map in x direction with phase slips corrected
+        phi2        - Optional : 2D arrays of phase shift map in y direction with phase slips corrected
+        Q1          - Optional : Coordinates of 1st Bragg peak, generated by phasemap (in rad per pixel)
+        Q2          - Optional : Coordinates of 2nd Bragg peak, generated by phasemap (in rad per pixel)
         method      - Optional : Specifying which method to use.
                                     "lockin": Used for phase shift map generated by lockin method
-                                    "convolution": Used for phase shift map generated by lockin method
+                                    "convolution": Used for phase shift map generated by convolution method
 
     Returns:
-        ux          - 2D array of drift field in x direction
-        uy          - 2D array of drift field in y direction
+        ux          - 2D array of drift field in x direction (in pixels)
+        uy          - 2D array of drift field in y direction (in pixels)
 
     Usage:
         import stmpy.driftcorr as dfc
-        ux, uy = dfc.driftmap(thetaxf, thetayf, Q1, Q2, method='lockin')
+        ux, uy = dfc.driftmap(theta1f, theta2f, Q1, Q2, method='lockin')
 
     History:
         04/28/2017      JG : Initial commit.
         04/29/2019      RL : Add "lockin" method, and add documents.
         11/30/2019      RL : Add support for non-square dataset
     '''
-    if method is "lockin":
-        tx = np.copy(phix)
-        ty = np.copy(phiy)
+    if method == "lockin":
+        tx = np.copy(phi1)
+        ty = np.copy(phi2)
         ux = -(Q2[1]*tx - Q1[1]*ty) / (Q1[0]*Q2[1]-Q1[1]*Q2[0])
         uy = -(Q2[0]*tx - Q1[0]*ty) / (Q1[1]*Q2[0]-Q1[0]*Q2[1])
         return ux, uy
-    elif method is "convolution":
-        #s = np.shape(thetax)[-1]
+    elif method == "convolution":
+        #s = np.shape(theta1)[-1]
         Qx_mag = np.sqrt((Q1[0])**2 + (Q1[1])**2)
         Qy_mag = np.sqrt((Q2[0])**2 + (Q2[1])**2)
-        Qx_ang = np.arctan2(Q1[1], Q1[0])  # in radians
-        Qy_ang = np.arctan2(Q2[1], Q2[0])  # in radians
-        Qxdrift = 1/(Qx_mag) * phix  # s/(2*np.pi*Qx_mag) * thetax
-        Qydrift = 1/(Qy_mag) * phiy  # s/(2*np.pi*Qy_mag) * thetay
+        Qx_ang = np.arctan2(Q1[1], Q1[0])  # in rad
+        Qy_ang = np.arctan2(Q2[1], Q2[0])  # in rad
+        Qxdrift = 1/(Qx_mag) * phi1  # s/(2*np.pi*Qx_mag) * theta1
+        Qydrift = 1/(Qy_mag) * phi2  # s/(2*np.pi*Qy_mag) * theta2
         ux = Qxdrift * np.cos(Qx_ang) - Qydrift * np.sin(Qy_ang-np.pi/2)
         uy = Qxdrift * np.sin(Qx_ang) + Qydrift * np.cos(Qy_ang-np.pi/2)
         return -ux, -uy
     else:
         print("Only two methods are available now:\n1. lockin\n2. convolution")
+
+
+def strainmap(ux, uy, Q1, Q2, spacing=1.0, smooth_sigma=5, mask=None):
+    from scipy.ndimage import gaussian_filter
+    """
+    Strain components along real-space lattice directions a1, a2.
+
+    Inputs:
+      ux, uy        : 2D arrays of displacement (pixels or nm) in lab x–y axes
+      Q1, Q2        : 2-vectors for the two Bragg wavevectors (rad per same unit used for spacing).
+                      Only their DIRECTIONS matter here; pass one from each ± pair.
+      spacing       : pixel size of ux,uy grid (default 1.0). Use 1.0 if gradients should be per-pixel.
+                      If ux,uy are in nm, set spacing to the nm/pixel to get ∂u/∂x in 1 (dimensionless, as strain).
+      smooth_sigma  : optional Gaussian sigma (in pixels) to smooth ux,uy before taking gradients (e.g., 1.0)
+      return_lab    : if True, also return (exx, eyy, exy) in lab frame
+      mask          : optional boolean mask; results outside set to NaN
+
+    Returns:
+      e11, e22, e12 : strain components along (a1,a2):
+                        e11 = ε_{a1a1} (normal along a1)
+                        e22 = ε_{a2a2} (normal along a2)
+                        e12 = ε_{a1a2} (symmetric shear between a1 and a2)
+      Also returns (exx, eyy, exy) if return_lab=True
+    """
+
+    # --- optionally denoise displacement before differentiating
+    if smooth_sigma is not None and smooth_sigma > 0:
+        ux = gaussian_filter(ux, smooth_sigma)
+        uy = gaussian_filter(uy, smooth_sigma)
+
+    # --- gradients (lab frame); strain is dimensionless if spacing matches ux,uy units
+    dux_dx = np.gradient(ux, spacing, axis=-1)
+    dux_dy = np.gradient(ux, spacing, axis=-2)
+    duy_dx = np.gradient(uy, spacing, axis=-1)
+    duy_dy = np.gradient(uy, spacing, axis=-2)
+
+    # Lab-frame symmetric strain tensor components
+    exx = dux_dx
+    eyy = duy_dy
+    exy = 0.5*(dux_dy + duy_dx)  # ε_xy = ε_yx
+
+    return exx, eyy, exy
+
+import numpy as np
+from scipy.ndimage import gaussian_filter
+
+def gpa_strain_from_carriers(Q1, Q2, psi1, psi2,
+                             amp_pct=10,          # 10–20 is typical
+                             smooth_px=1.0,       # complex blur (px) before gradients; 0 to disable
+                             spacing=(1.0, 1.0),  # (dy, dx) in same units as you want derivatives
+                             mask=None,
+                             return_all=False):
+    """
+    Unwrap-free GPA from already computed complex carriers.
+    Inputs:
+      Q1,Q2   : 2-vectors (rad/pixel or rad/nm; be consistent with `spacing`)
+      psi1,psi2 : complex carriers (psi = A * exp(i*theta)) for the two Bragg vectors
+      A1,A2   : optional amplitudes |psi|; recomputed if None
+      amp_pct : percentile to build validity mask from A1,A2 if mask is None
+      smooth_px: Gaussian sigma (px) on psi before gradients
+      spacing : (dy, dx) step for np.gradient. Use (1,1) for per-pixel; (pix_nm, pix_nm) for per-nm
+      mask    : optional boolean mask; if None, built from amplitudes
+    Returns:
+      exx, eyy, exy, rot, eps_h, eps_s  (all dimensionless)
+      (+ extras dict if return_all=True)
+    """
+    # amplitudes & optional complex smoothing
+    A1 = np.abs(psi1)
+    A2 = np.abs(psi2)
+    if smooth_px and smooth_px > 0:
+        psi1 = gaussian_filter(psi1, smooth_px)
+        psi2 = gaussian_filter(psi2, smooth_px)
+
+    # validity mask
+    if mask is None:
+        t1 = np.percentile(A1[np.isfinite(A1)], amp_pct)
+        t2 = np.percentile(A2[np.isfinite(A2)], amp_pct)
+        mask = (A1 > t1) & (A2 > t2)
+
+    dy, dx = spacing
+    # phase gradients without unwrap: ∇φ = Im(ψ*∇ψ)/|ψ|^2
+    dpsi1_dx = np.gradient(psi1, dx, axis=1); dpsi1_dy = np.gradient(psi1, dy, axis=0)
+    dpsi2_dx = np.gradient(psi2, dx, axis=1); dpsi2_dy = np.gradient(psi2, dy, axis=0)
+    den1 = (A1**2) + 1e-12
+    den2 = (A2**2) + 1e-12
+    dphi1_dx = np.where(mask, np.imag(np.conj(psi1)*dpsi1_dx)/den1, np.nan)
+    dphi1_dy = np.where(mask, np.imag(np.conj(psi1)*dpsi1_dy)/den1, np.nan)
+    dphi2_dx = np.where(mask, np.imag(np.conj(psi2)*dpsi2_dx)/den2, np.nan)
+    dphi2_dy = np.where(mask, np.imag(np.conj(psi2)*dpsi2_dy)/den2, np.nan)
+
+    # per-pixel 2×2 solve for Jacobian columns
+    Q = np.array([[Q1[0], Q1[1]],[Q2[0], Q2[1]]], float)
+    det = Q[0,0]*Q[1,1] - Q[0,1]*Q[1,0]
+    if np.isclose(det, 0.0):
+        raise ValueError("Bragg vectors nearly collinear; choose a better pair.")
+    Qinv = np.linalg.inv(Q)
+
+    du_dx = Qinv[0,0]*dphi1_dx + Qinv[0,1]*dphi2_dx
+    dv_dx = Qinv[1,0]*dphi1_dx + Qinv[1,1]*dphi2_dx
+    du_dy = Qinv[0,0]*dphi1_dy + Qinv[0,1]*dphi2_dy
+    dv_dy = Qinv[1,0]*dphi1_dy + Qinv[1,1]*dphi2_dy
+
+    # symmetric strain + rotation
+    exx = du_dx
+    eyy = dv_dy
+    exy = 0.5*(du_dy + dv_dx)
+    rot = 0.5*(du_dy - dv_dx)
+
+    # invariants
+    eps_h = 0.5*(exx + eyy)
+    eps_s = np.sqrt(((exx - eyy)*0.5)**2 + exy**2)
+
+    if return_all:
+        extras = dict(mask=mask, A1=A1, A2=A2, du_dx=du_dx, dv_dx=dv_dx, du_dy=du_dy, dv_dy=dv_dy)
+        return exx, eyy, exy, rot, eps_h, eps_s, extras
+    return exx, eyy, exy, rot, eps_h, eps_s
+
+import numpy as np
+
+def strain_along_lattice(exx, eyy, exy, Q1, Q2):
+    """
+    Directional strains along the real-space lattice vectors a1, a2.
+
+    Inputs
+    ------
+    exx, eyy, exy : 2D arrays (lab-frame strain tensor components)
+    Q1, Q2        : length-2 arrays (rad per pixel or per nm; only direction matters)
+
+    Returns
+    -------
+    e11 : ε along a1 (a1 ⟂ Q2)
+    e22 : ε along a2 (a2 ⟂ Q1)
+    e12 : symmetric shear between a1 and a2
+    """
+    Q1 = np.asarray(Q1, float); Q2 = np.asarray(Q2, float)
+
+    # unit lattice directions: a1 ⟂ Q2, a2 ⟂ Q1
+    perp = lambda v: np.array([v[1], -v[0]], float)     # +90° rotate in x–y
+    e1 = perp(Q2); e1 /= np.linalg.norm(e1) + 1e-15     # direction of a1
+    e2 = perp(Q1); e2 /= np.linalg.norm(e2) + 1e-15     # direction of a2
+
+    e1x, e1y = e1;  e2x, e2y = e2
+
+    # directional projections: t^T E t and t1^T E t2
+    e11 = (e1x**2)*exx + 2*(e1x*e1y)*exy + (e1y**2)*eyy
+    e22 = (e2x**2)*exx + 2*(e2x*e2y)*exy + (e2y**2)*eyy
+    e12 = (e1x*e2x)*exx + (e1x*e2y + e1y*e2x)*exy + (e1y*e2y)*eyy
+
+    return e11, e22, e12
 
 #8. - driftcorr
 def driftcorr(A, ux=None, uy=None, method="lockin", interpolation='cubic'):
@@ -1639,7 +1942,7 @@ def _apply_drift_field(A, ux, uy, zeroOut=True):
     return np.real(invFT)
 
 #9
-def generate_bp(A, bp, angle=np.pi/2, orient=np.pi/4, even_out=False, obj=None):
+def generate_bp(A, bp, angle=np.pi/2, bp_pick=(0,1), orient=None, even_out=False, obj=None):
     '''
     Generate Bragg peaks with given q-vectorss
 
@@ -1647,7 +1950,7 @@ def generate_bp(A, bp, angle=np.pi/2, orient=np.pi/4, even_out=False, obj=None):
         A           - Required : 2D array of topo in real space, or FFT in q space.
         bp          - Required : Bragg peaks associated with A, to be checked
         angle       - Optional : Angle of the lattice. If the lattice is n-fold symmetry, then angle = 2*pi/n
-        orient      - Optional : Initial angle of Bragg peak, or orientation of the scan. Default is np.pi/4
+        orient      - Optional : Initial angle of Bragg peak, or orientation of the scan. Default is None
         obj         - Optional : Data object that has bp_parameters with it,
 
     Return:
@@ -1659,27 +1962,42 @@ def generate_bp(A, bp, angle=np.pi/2, orient=np.pi/4, even_out=False, obj=None):
     History:
         05-25-2020      RL : Initial commit.
         06-08-2020      RL : Add the ability to compute correct Bragg peaks automatically
+        10-03-2025      ZM : Changed to read radius from all Bragg peaks
     '''
     *_, s2, s1 = np.shape(A)
-    bp = sortBraggs(bp, s=np.shape(A))
-    center = (np.array([s1, s2])-1) // 2
-    Q1, Q2, Q3, Q4, *_ = bp
-    if orient == None:
-        orient = np.arctan2(*(Q1-center)[::-1])
-    Qx_mag = compute_dist(Q1, center)
-    Qy_mag = compute_dist(Q2, center)
-    Q_corr = np.mean([Qx_mag, Qy_mag])
-    Qc1 = np.array([int(k) for k in Q_corr*np.array([np.cos(orient+np.pi), np.sin(orient+np.pi)])])
-    Qc2 = np.array([int(k) for k in Q_corr*np.array([np.cos(-angle+orient+np.pi), np.sin(-angle+orient+np.pi)])])
-    bp_out = np.array([Qc1, Qc2, -Qc1, -Qc2]) + center
+    bp_sorted = sortBraggs(bp, s=np.shape(A))
+    center = (np.array([s1, s2]) - 1) // 2
+
+    # robust radius from all peaks
+    v_all = bp_sorted - center
+    r_all = np.linalg.norm(v_all, axis=1)
+    Q_corr = np.median(r_all)  # robust to outliers
+
+    # pick which two to keep (indices into the sorted peaks)
+    i, j = map(int, bp_pick)
+    phi_i = np.arctan2(v_all[i, 1], v_all[i, 0])
+    phi_j = np.arctan2(v_all[j, 1], v_all[j, 0])
+
+    # rescale those two directions to the common radius
+    q_i = np.rint(Q_corr * np.array([np.cos(phi_i), np.sin(phi_i)])).astype(int)
+    q_j = np.rint(Q_corr * np.array([np.cos(phi_j), np.sin(phi_j)])).astype(int)
+
+    vecs = [q_i, q_j]
+
+    vecs += [-q_i, -q_j]
+
+    bp_out = np.array(vecs) + center
+
     if even_out is not False:
         bp_out = __even_bp(bp_out, s=np.shape(A))
-                
+
     if obj is not None:
         pixels = np.shape(A)[::-1]
         __update_parameters(obj, a0=obj.parameters['a0'], bp=bp_out, pixels=pixels,
                             size=obj.parameters['size'], use_a0=obj.parameters['use_a0'])
-    return sortBraggs(bp_out, s=np.shape(A))
+
+    # return sortBraggs(bp_out, s=np.shape(A))
+    return bp_out
 
 ##################################################################################
 ####################### Useful functions in the processing #######################
@@ -1711,6 +2029,8 @@ def FTDCfilter(A, sigma1, sigma2):
     '''
     Filtering DC component of Fourier transform and inverse FT, using a gaussian with one parameter sigma
     A is a 2D array, sigma is in unit of px
+    sigma1 is the sigma along x direction (unit: k space pixels)
+    sigma2 is the sigma along y direction (unit: k space pixels)
     '''
     *_, s2, s1 = A.shape
     m1, m2 = np.arange(s1, dtype='float'), np.arange(s2, dtype='float')
@@ -1768,7 +2088,9 @@ def __even_bp(bp, s):
 #15. - display
 
 
-def display(*args, sigma=3, clim_same=True):
+def display(*args, sigma=3, clim_same=True,                              r_crop_n=0,
+                             r_box_center=None,
+                             r_box_size=None,):
     '''
     Display or compare images in both real space and q-space.
 
@@ -1793,7 +2115,9 @@ def display(*args, sigma=3, clim_same=True):
     # Define the subplot grid
     fig, ax = plt.subplots(len(args), 2, figsize=[8, 4*len(args)])
 
+        
     for i, A in enumerate(args):
+
         A_fft = stmpy.tools.fft(A, zeroDC=True)
         c, s = global_clim if clim_same else (np.mean(A_fft), np.std(A_fft))
         
@@ -1802,15 +2126,53 @@ def display(*args, sigma=3, clim_same=True):
             ax[i, 0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
             ax[i, 1].imshow(A_fft, cmap=stmpy.cm.gray_r,
                             origin='lower', clim=[0, c+sigma*s])
+            
+            if r_crop_n > 0:
+                # make a white dashed square to indicate cropped region
+                h, w = A.shape
+                rect = patches.Rectangle((r_crop_n, r_crop_n), w - 2*r_crop_n, h - 2*r_crop_n, linewidth=1, edgecolor='w', facecolor='none')
+                ax[i, 0].add_patch(rect)
+            elif r_box_center is not None and r_box_size is not None:
+                cx, cy = r_box_center
+                sx, sy = np.array(r_box_size) / 2
+                rect = patches.Rectangle((cx - sx, cy - sy), 2*sx, 2*sy, linewidth=1, edgecolor='w', facecolor='none')
+                ax[i, 0].add_patch(rect)
+
             ax[i, 0].set_aspect(1)
             ax[i, 1].set_aspect(1)
         else:
             ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
             ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r,
                         origin='lower', clim=[0, c+sigma*s])
+            
+            if r_crop_n > 0:
+                # make a white dashed square to indicate cropped region
+                h, w = A.shape
+                rect = patches.Rectangle((r_crop_n, r_crop_n), w - 2*r_crop_n, h - 2*r_crop_n, linewidth=1, edgecolor='w', facecolor='none')
+                ax[0].add_patch(rect)
+            elif r_box_center is not None and r_box_size is not None:
+                cx, cy = r_box_center
+                sx, sy = np.array(r_box_size) / 2
+                rect = patches.Rectangle((cx - sx, cy - sy), 2*sx, 2*sy, linewidth=1, edgecolor='w', facecolor='none')
+                ax[0].add_patch(rect)
+            
             ax[0].set_aspect(1)
             ax[1].set_aspect(1)
 
+def crop_and_display(A, r_crop_n=0,
+                     r_box_center=None,
+                     r_box_size=None):
+    if r_crop_n > 0:
+        A_crop = A[r_crop_n:-r_crop_n, r_crop_n:-r_crop_n]
+    elif r_box_center is not None and r_box_size is not None:
+        cx, cy = r_box_center
+        sx, sy = np.array(r_box_size) / 2
+        A_crop = A[int(cy-sy):int(cy+sy), int(cx-sx):int(cx+sx)]
+    else:
+        A_crop = A
+    display(A, r_crop_n=r_crop_n, r_box_center=r_box_center, r_box_size=r_box_size)
+    display(A_crop)
+    return A_crop
 
 def quick_linecut(A, width=2, n=4, bp=None, ax=None, thres=3):
     """

@@ -182,11 +182,13 @@ def add_colorbar(loc=0, label='', fs=12, size='5%', pad=0.05, ax=None, im=None,
         fig.add_axes(cax)
         cbar = fig.colorbar(im, cax=cax, orientation='horizontal')
         cbar.set_label(label, fontsize=fs)
+        cbar.ax.xaxis.get_offset_text().set_fontsize(fs)
     elif loc == 1:
         cax = divider.new_horizontal(size=size, pad=pad, pack_start=False)
         fig.add_axes(cax)
         cbar = fig.colorbar(im, cax=cax, orientation='vertical')
         cbar.set_label(label, fontsize=fs)
+        cbar.ax.yaxis.get_offset_text().set_fontsize(fs)
     elif loc == 2:
         cax = divider.new_vertical(size=size, pad=pad, pack_start=False)
         fig.add_axes(cax)
@@ -194,6 +196,7 @@ def add_colorbar(loc=0, label='', fs=12, size='5%', pad=0.05, ax=None, im=None,
         cbar.set_label(label, fontsize=fs)
         cbar.ax.xaxis.set_ticks_position('top')
         cbar.ax.xaxis.set_label_position('top')
+        cbar.ax.xaxis.get_offset_text().set_fontsize(fs)
     elif loc == 3:
         cax = divider.new_horizontal(size=size, pad=pad, pack_start=True)
         fig.add_axes(cax)
@@ -201,10 +204,15 @@ def add_colorbar(loc=0, label='', fs=12, size='5%', pad=0.05, ax=None, im=None,
         cbar.set_label(label, fontsize=fs)
         cbar.ax.yaxis.set_ticks_position('left')
         cbar.ax.yaxis.set_label_position('left')
+        cbar.ax.yaxis.get_offset_text().set_fontsize(fs)
     else:
         raise ValueError('loc must be 0 (bottom), 1 (right), 2 (top) or 3 (left).')
     if ticks is False:
         cbar.set_ticks([])
+    else:
+        #set fontsize of ticks
+        cbar.ax.tick_params(labelsize=fs)
+
     return cbar
 
 def add_cbar(ax=None, im=None, orient='v', length='45%', thickness='7%',
