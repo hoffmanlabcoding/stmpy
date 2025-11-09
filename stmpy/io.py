@@ -686,6 +686,17 @@ def load_sxm(filePath):
         self.LIY = self.channels['LIY_1_omega_Fwd']
     except KeyError: print('WARNING:  Could not create standard attributes, look in channels instead.')
     fileObj.close()
+
+    self.scan_info = {
+        'n_pixels': int(self.header['scan_pixels'][0]),
+        'scan_size': self.header['scan_range'][0]*1e9,
+        'set_current': float(self.header['z-controller']['Setpoint'].replace(' A',''))*1e12,
+        'set_voltage': float(self.header['bias']),
+    }
+    info_str = (f"{self.scan_info['set_voltage']:.2f}V_{self.scan_info['set_current']:.1f}pA_{self.scan_info['scan_size']:.0f}nm_{self.scan_info['n_pixels']}x{self.scan_info['n_pixels']}"
+                )
+
+    self.info_str = info_str
     return self
 
 
