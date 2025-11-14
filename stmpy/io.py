@@ -1003,16 +1003,16 @@ def load_sm4(filePath):
     # print(dir(self))    
 
     if _make_attr(self, 'LIY', [liy], 'data'):
-        self.didv = np.flipud(np.fliplr(np.mean(self.LIY, axis=0)))
-        self.didvStd = np.flipud(np.fliplr(np.std(self.LIY, axis=0)))
-        self.LIY = np.flipud(np.fliplr(self.LIY))
+        self.LIY = np.flipud(np.fliplr(ensure_square(self.LIY)))
+        self.didvStd = np.std(self.LIY, axis=0)
+        self.didv = np.mean(self.LIY, axis=0)
 
         if match_channel('LINELIA current', liy+1) or match_channel('LINELIA Current', liy+1):
             if _make_attr(self, 'LIY_BWD', [liy+1], 'data'):
-                self.didv_BWD = np.flipud(np.fliplr(np.mean(self.LIY_BWD, axis=0)))
-                self.didvStd_BWD = np.flipud(np.fliplr(np.std(self.LIY_BWD, axis=0)))
+                
                 self.LIY_BWD = np.flipud(np.fliplr(ensure_square(self.LIY_BWD)))
-
+                self.didv_BWD = np.mean(self.LIY_BWD, axis=0)
+                self.didvStd_BWD = np.std(self.LIY_BWD, axis=0)
                 print('LIY FWD and BWD found')
 
         else:
@@ -1023,15 +1023,14 @@ def load_sm4(filePath):
     
 
     if _make_attr(self, 'I', [i], 'data'):
-        self.iv = np.flipud(np.fliplr(np.mean(self.I,  axis=0)))
+        
         self.I = np.flipud(np.fliplr(ensure_square(self.I)))
-
+        self.iv = np.mean(self.I,  axis=0)
         
         if match_channel('LINECurrent', i+1):
             if _make_attr(self, 'I_BWD', [i+1], 'data'):
-                self.iv_BWD = np.flipud(np.fliplr(np.mean(self.I_BWD, axis=0)))
                 self.I_BWD = np.flipud(np.fliplr(ensure_square(self.I_BWD)))
-
+                self.iv_BWD = np.mean(self.I_BWD, axis=0)
                 print('I FWD and BWD found')
         else:
                 print('I only FWD found')
