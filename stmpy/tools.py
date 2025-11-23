@@ -795,56 +795,103 @@ def track_peak(x, z, p0, **kwarg):
     return mu
 
 
-def plane_subtract(data, deg, X0=None):
-    '''
-    Subtracts a polynomial plane from an image. The polynomial does not keep
-    any cross terms, i.e. not xy, only x^2 and y*2.  I think this is fine and
-    just doesn't keep any hyperbolic-like terms.
 
-    Inputs:
-        data    - Required : A 2D or 3D numpy array containing data
-        deg     - Required : Degree of polynomial to be removed.
-        X0      - Optional : Guess optimization parameters for
-                             scipy.optimize.minimize.
+def plane_subtract(data, deg, X0=None, include_cross_terms=False, preserve_units=False):
+    """
+    Subtract a polynomial 'plane' from each 2D layer (or a single 2D array).
 
-    Returns:
-        subtractedData - Data with a polynomial plane removed.
+    Parameters
+    ----------
+    data : (H, W) or (N, H, W) ndarray
+        Input image (or stack of images).
+    deg : int
+        Polynomial degree.
+    X0 : 1D array-like, optional
+        Initial guess for coefficients. If None, zeros are used with the right length.
+    include_cross_terms : bool, default False
+        If False: only include {1, x, y, x^2, y^2, ..., x^deg, y^deg}  (no cross terms).
+        If True : include all monomials x^i y^j with i + j <= deg (no (0,0) duplicate).
+    preserve_units : bool, default False
+        If True : fit directly on the original data and return residuals in the same units.
+        If False: subtract mean and divide by abs(max deviation), fit there, and return
+                  the unitless normalized residual (safer, symmetric scaling).
 
+    Returns
+    -------
+    out : ndarray
+        Residual after polynomial subtraction. Same shape as `data`.
+        Units: same as input if preserve_units=True, otherwise unitless.
+    
     History:
-        2017-07-13  - HP : Fixed so that it works up to at least 3rd order.
-    '''
-    def plane(a):
-        x = np.arange(subtract2D.norm.shape[1])
-        y = np.arange(subtract2D.norm.shape[0])
-        x = x[None,:]
-        y = y[:,None]
-        z = np.zeros_like(subtract2D.norm) + a[0]
-        N = int((len(a)-1)/2)
-        for k in range(1, N+1):
-            z += a[2*k-1] * x**k + a[2*k] * y**k
-        return z
-    def chi(X):
-        chi.fit = plane(X)
-        res = subtract2D.norm - chi.fit
-        err = np.sum(np.absolute(res))
-        return err
-    def subtract2D(layer):
-        vx = np.linspace(-1, 1, layer.shape[0])
-        vy = np.linspace(-1, 1, layer.shape[1])
-        x, y = vx[:, None], vy[None, :]
-        subtract2D.norm = (layer-np.mean(layer)) / np.max(layer-np.mean(layer))
-        result = opt.minimize(chi, X0)
-        return subtract2D.norm - chi.fit
-    if X0 is None:
-        X0 = np.zeros([2*deg+1])
-    if len(data.shape) == 2:
-        return subtract2D(data)
-    elif len(data.shape) == 3:
-        output = np.zeros_like(data)
-        for ix, layer in enumerate(data):
-            output[ix] = subtract2D(layer)
-        return output
+    2017-07-13  - HP : Fixed so that it works up to at least 3rd order.
+    2025-11-23  - ZM : Refactored and added options for cross terms and unit preservation.
+    """
+    data = np.asarray(data*1e12)
 
+    def terms_list(deg, include_cross):
+        if include_cross:
+            return [(i, j) for i in range(deg + 1) for j in range(deg + 1)
+                    if 1 <= i + j <= deg]
+        else:
+            return ([(k, 0) for k in range(1, deg + 1)] +
+                    [(0, k) for k in range(1, deg + 1)])
+
+    T = terms_list(deg, include_cross_terms)
+    n_params = 1 + len(T)  # constant + others
+
+    def build_plane(a, x, y):
+        # x: (1, W), y: (H, 1)
+        H, W = y.shape[0], x.shape[1]
+        z = np.zeros((H, W), dtype=float)
+        z += a[0]
+        for idx, (i, j) in enumerate(T, start=1):
+            if i == 0:
+                z += a[idx] * (y ** j)              # (H,1) -> (H,W)
+            elif j == 0:
+                z += a[idx] * (x ** i)              # (1,W) -> (H,W)
+            else:
+                z += a[idx] * ((x ** i) * (y ** j)) # (H,W)
+        return z
+
+    def fit_and_residual(layer):
+        layer = np.asarray(layer, dtype=float)
+        H, W = layer.shape
+        x = np.arange(W, dtype=float)[None, :]   # (1, W)
+        y = np.arange(H, dtype=float)[:, None]   # (H, 1)
+
+        if preserve_units:
+            target = layer
+        else:
+            mean = np.mean(layer)
+            dev = layer - mean
+            absmax = np.max(np.abs(dev))
+            if absmax == 0:
+                return np.zeros_like(layer, dtype=float)
+            target = dev / absmax  # unitless, symmetric normalization
+
+        a0 = np.zeros(n_params, dtype=float) if X0 is None else np.array(X0, dtype=float)
+        if a0.size != n_params:
+            raise ValueError(f"X0 has length {a0.size}, expected {n_params} for deg={deg} "
+                             f"and include_cross_terms={include_cross_terms}")
+
+        def chi(a):
+            return np.sum(np.abs(target - build_plane(a, x, y)))
+
+        res = opt.minimize(chi, a0, method="Powell")
+        fit = build_plane(res.x, x, y)
+        return target - fit
+
+    if data.ndim == 2:
+        return fit_and_residual(data)*1e-12 if preserve_units else out
+    elif data.ndim == 3:
+        out = np.empty_like(data, dtype=float)
+        for i in range(data.shape[0]):
+            out[i] = fit_and_residual(data[i])
+        return out*1e-12 if preserve_units else out
+    else:
+        raise ValueError("`data` must be 2D or 3D.")
+    
+    
 def butter_lowpass_filter(data, ncutoff=0.5, order=1, method='pad', padtype='odd', irlen=None):
     '''
     Low-pass filter applied for an individual spectrum (.dat) or every spectrum in a DOS map (.3ds)
