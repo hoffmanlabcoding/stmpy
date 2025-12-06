@@ -17,6 +17,8 @@ import os
 import stmpy
 import matplotlib.pyplot as plt
 
+from matplotlib.animation import FuncAnimation
+
 
 def plot_FFT_data(data, 
                   k_crop_n = 0, 
@@ -487,6 +489,43 @@ def compute_shape_params(
         # plt.tight_layout()
         # plt.show()
 
+def smooth_LIY(LIY, window=5, axis=0, mode='reflect'):
+    """
+    Smooths the LIY data by a moving mean along the specified axis.
+
+    Parameters
+    ----------
+    LIY : np.ndarray
+        3D array (E, I, J)
+    window : int
+        Size of the moving average window (must be >= 1)
+    axis : int
+        Axis along which to smooth (default 0: energy axis)
+    mode : str
+        How to handle edges. Options: 'reflect', 'nearest', 'constant', 'wrap'.
+        Passed to np.pad.
+
+    Returns
+    -------
+    np.ndarray
+        Smoothed array with same shape as LIY.
+    """
+    if window < 2:
+        return LIY.copy()
+
+    LIY = np.asarray(LIY)
+    pad = window // 2
+    LIY_padded = np.pad(LIY, 
+                        [(pad, pad) if a == axis else (0, 0) for a in range(LIY.ndim)],
+                        mode=mode)
+    cumsum = np.cumsum(LIY_padded, axis=axis)
+    # difference between cumulative sums gives moving average
+    slices1 = [slice(None)] * LIY.ndim
+    slices2 = [slice(None)] * LIY.ndim
+    slices1[axis] = slice(window, None)
+    slices2[axis] = slice(None, -window)
+    smoothed = (cumsum[tuple(slices1)] - cumsum[tuple(slices2)]) / window
+    return smoothed
 
 def plot_all_didv(data, ax=None, alpha=0.3,grid='False'):
     """
@@ -546,6 +585,123 @@ def plot_all_didv(data, ax=None, alpha=0.3,grid='False'):
     return fig, ax
 
 
+def animate_ldos_with_topo(data, interval=80, repeat=True,
+                           use_global_ylim=True, cmap=stmpy.cm.Blues_r,
+                           start_ij=(0,0), click_to_jump=True):
+    """
+    Show topo on the left and LDOS(E) on the right; animate across all spatial pixels.
+    A red marker on the topo shows the currently plotted (i, j).
+
+    Parameters
+    ----------
+    en : (E,) array
+    LIY_3d : (E, I, J) array
+    topo_2d : (I, J) array
+    interval : ms between frames
+    repeat : loop animation
+    use_global_ylim : fix y-limits from global min/max for steadier view
+    cmap : colormap for topo
+    start_ij : starting (i, j) index
+    click_to_jump : click on topo to jump to that pixel’s spectrum
+    """
+    LIY_3d = np.asarray(data.LIY)
+    LIY_smoothed = np.asarray(data.LIY_smoothed)
+    LIY_fitted = np.asarray(data.liy_fitted)*1e-12
+    en = np.asarray(data.en)
+    topo_2d = np.asarray(data.Z_ls)
+
+    assert LIY_3d.ndim == 3 and topo_2d.ndim == 2, "Shapes: LIY (E,I,J), topo (I,J)"
+    E, I, J = LIY_3d.shape
+    assert en.shape[0] == E and topo_2d.shape == (I, J), "Shape mismatch"
+
+    ij_list = [(i, j) for i in range(I) for j in range(J)]
+    start_i, start_j = np.clip(start_ij[0], 0, I-1), np.clip(start_ij[1], 0, J-1)
+    start_frame = ij_list.index((start_i, start_j))
+
+    # Figure layout
+    fig, [ax_topo, ax_spec] = plt.subplots(1, 2, figsize=(15, 5))
+
+    # --- Topography
+    im = ax_topo.imshow(topo_2d, origin='lower', cmap=cmap, aspect='equal')
+    cb = fig.colorbar(im, ax=ax_topo, fraction=0.046, pad=0.04)
+    cb.set_label('Topo (a.u.)')
+    ax_topo.set_title("Topography")
+    ax_topo.set_xlabel("j (col)")
+    ax_topo.set_ylabel("i (row)")
+
+    # Marker at (start_i, start_j). Note imshow uses x=j, y=i.
+    marker = ax_topo.scatter([start_j], [start_i], s=80, facecolors='none',
+                             edgecolors='r', linewidths=1.8)
+
+    # --- Spectrum
+    line, = ax_spec.plot(en, LIY_3d[:, start_i, start_j], color='gray', lw=1.8, label='Raw')
+    line_smoothed, = ax_spec.plot(en, LIY_smoothed[:, start_i, start_j]+1e-12, color='blue', lw=1.8, label='Smoothed')
+    line_fitted, = ax_spec.plot(en, LIY_fitted[:, start_i, start_j]+2e-12, color='red', lw=1.8, label='Fitted')
+    ax_spec.set_xlabel("Bias (V)")
+    ax_spec.set_ylabel("dI/dV (a.u.)")
+    ax_spec.legend()
+    title_spec = ax_spec.set_title(f"LDOS at (i,j)=({start_i},{start_j})")
+    txt = ax_spec.text(0.98, 0.92, f"({start_i},{start_j})", transform=ax_spec.transAxes,
+                       ha='right', va='top', fontsize=10, alpha=0.8)
+
+    if use_global_ylim:
+        ymin = np.nanmin(LIY_3d)
+        ymax = np.nanmax(LIY_3d)
+        if not np.isfinite(ymin) or not np.isfinite(ymax) or ymin == ymax:
+            ymin, ymax = -1, 1
+        ax_spec.set_ylim(ymin, ymax)
+
+    # --- Update function
+    def update(frame):
+        i, j = ij_list[frame]
+        # update spectrum
+        y = LIY_3d[:, i, j]
+        line.set_ydata(y)
+        line_fitted.set_ydata(LIY_fitted[:, i, j])
+        line_smoothed.set_ydata(LIY_smoothed[:, i, j])
+        
+        title_spec.set_text(f"LDOS at (i,j)=({i},{j})")
+        txt.set_text(f"({i},{j})")
+        if not use_global_ylim:
+            ax_spec.relim()
+            ax_spec.autoscale_view()
+
+        # move marker
+        marker.set_offsets([[j, i]])
+        return line, marker, title_spec, txt
+
+    anim = FuncAnimation(fig, update, frames=len(ij_list),
+                         interval=interval, blit=False, repeat=repeat)
+
+    # --- Optional: click on the topo to jump to a pixel
+    if click_to_jump:
+        def onclick(event):
+            if event.inaxes is not ax_topo or event.xdata is None or event.ydata is None:
+                return
+            j = int(round(event.xdata))
+            i = int(round(event.ydata))
+            if 0 <= i < I and 0 <= j < J:
+                frame = ij_list.index((i, j))
+                update(frame)
+                fig.canvas.draw_idle()
+        fig.canvas.mpl_connect('button_press_event', onclick)
+
+    plt.show()
+    return anim
+
+# ---------- Use it ----------
+# Assuming you already smoothed:
+# dos_E.LIY_smoothed = smooth_LIY(dos_E.LIY, window=10, axis=0, mode='reflect')
+
+# Run the combined animation/plot:
+# anim = animate_ldos_with_topo(dos_E.en, dos_E.LIY_smoothed, dos_E.Z_ls,
+#                               interval=80, repeat=True, use_global_ylim=True,
+#                               start_ij=(24,40), click_to_jump=True)
+
+# Optional saving (uncomment one):
+# anim.save("ldos_with_topo.mp4", writer="ffmpeg", dpi=150, bitrate=1800)
+# from matplotlib.animation import PillowWriter
+# anim.save("ldos_with_topo.gif", writer=PillowWriter(fps=12))
 
 def plot_rk_space(data, ens=None):
     if ens is None:
