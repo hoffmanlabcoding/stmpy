@@ -16,9 +16,12 @@ from pathlib import Path
 import os
 import stmpy
 import matplotlib.pyplot as plt
-
+import matplotlib.gridspec as gridspec
 from matplotlib.animation import FuncAnimation
 
+from scipy.optimize import curve_fit, OptimizeWarning
+from tqdm import tqdm  # For a progress bar
+import warnings
 
 def plot_FFT_data(data, 
                   k_crop_n = 0, 
@@ -585,8 +588,243 @@ def plot_all_didv(data, ax=None, alpha=0.3,grid='False'):
     return fig, ax
 
 
-def animate_ldos_with_topo(data, interval=80, repeat=True,
-                           use_global_ylim=True, cmap=stmpy.cm.Blues_r,
+
+def sts_model(V, amp_L, edge_L, amp_R, edge_R, broad, bump_amp, bump_pos, bump_width, offset):
+    """
+    Defines the fitting model for a single STS spectrum.
+
+    V: Voltage/Energy array
+    amp_L, amp_R: Amplitude of Valence/Conduction bands
+    edge_L, edge_R: Position of band edges (e.g. -0.5 and +0.5)
+    broad: Broadening factor (smoothness of the turn-on)
+    bump_*: Parameters for the mid-gap bump (Gaussian)
+    offset: vertical offset (noise floor)
+    """
+    
+    # Left side (Valence Band) - turns on as V goes negative
+    left_side = amp_L / (1 + np.exp((V - edge_L) / broad))
+    
+    # Right side (Conduction Band) - turns on as V goes positive
+    right_side = amp_R / (1 + np.exp(-(V - edge_R) / broad))
+    
+    # The Bump (Gaussian)
+    bump = bump_amp * np.exp(-(V - bump_pos)**2 / (2 * bump_width**2))
+    
+    # Total signal
+    return left_side + right_side + bump + offset
+
+
+
+def fit_sts_map(x_data, y_data_cube, model, p0, bounds=None):
+    """
+    Fits an STS model to every pixel in a 3D data cube (E, Y, X).
+
+    Args:
+        x_data (1D array): The energy/voltage array.
+        y_data_cube (3D array): The LIY data, with shape (N_E, N_Y, N_X).
+        model (function): The fitting function to use (e.g., sts_model).
+        p0 (list): Initial guess for parameters.
+        bounds (tuple): (min_bounds, max_bounds) for parameters.
+
+    Returns:
+        param_map (3D array): A map of fitted parameters.
+                              Shape is (N_Y, N_X, N_Params).
+        error_map (2D array): A map of the fit error (sum of cov diagonal).
+                              Shape is (N_Y, N_X).
+        liy_fitted_cube (3D array): A cube of the fitted LIY spectra.
+                                    Shape is (N_E, N_Y, N_X).
+    """
+    
+    # Get dimensions
+    if y_data_cube.ndim != 3:
+        raise ValueError(f"Input data cube must be 3D (E, Y, X), but got {y_data_cube.ndim} dimensions")
+    
+    N_E, N_Y, N_X = y_data_cube.shape
+    N_params = len(p0)
+    
+    # Create empty arrays to store the results
+    # We use np.nan to mark pixels where the fit fails
+    param_map = np.full((N_Y, N_X, N_params), np.nan)
+    error_map = np.full((N_Y, N_X), np.nan)
+    liy_fitted_cube = np.full((N_E, N_Y, N_X), np.nan)
+    
+    # Loop over every pixel (Y, X)
+    # We use tqdm to create a nice progress bar
+    for i in tqdm(range(N_Y), desc="Fitting STS Map Rows"):
+        for j in range(N_X):
+            
+            # Get the 1D spectrum for this pixel
+            y_pixel = y_data_cube[:, i, j]
+            
+            # Skip if data is all NaN or all zero
+            if np.all(np.isnan(y_pixel)) or not np.any(y_pixel):
+                continue
+
+            try:
+                # Ignore OptimizeWarnings (e.g. covariance not estimated)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", OptimizeWarning)
+
+                    popt, pcov = curve_fit(
+                        model,
+                        x_data,
+                        y_pixel,
+                        p0=p0,
+                        bounds=bounds if bounds is not None else (-np.inf, np.inf),
+                        maxfev=5000,  # a bit more robust
+                    )
+
+            except (RuntimeError, ValueError):
+                # Fit failed for this pixel – leave NaNs and move on
+                continue
+
+            # Store parameters
+            param_map[i, j, :] = popt
+
+            # Simple error metric: sqrt(sum of variances)
+            if pcov is not None and np.all(np.isfinite(pcov)):
+                error_map[i, j] = np.sqrt(np.sum(np.diag(pcov)))
+
+            # Store fitted spectrum
+            liy_fitted_cube[:, i, j] = model(x_data, *popt)
+
+    return param_map, error_map, liy_fitted_cube
+
+def analyze_dos_data(data_object, crop_rect=None, scale_factor=1e12, p0=None, bounds=None, cmap='viridis', plot_results=True, check_pixel=(5,5)):
+    """
+    Runs the full STS fitting analysis on a given data object.
+
+    Args:
+        data_object: An object (like dos_E) that has .en (1D) and .LIY (3D) attributes.
+                     The results will be attached to this object.
+        crop_rect (tuple): A tuple of slices for (Y, X) dimensions, e.g., (slice(0, 10), slice(0, 10)).
+                           If None, the full map is used.
+        scale_factor (float): Factor to multiply LIY data by (e.g., 1e12).
+        p0 (list): Initial parameter guess. Uses a default if None.
+        bounds (tuple): Parameter bounds. Uses a default if None.
+        plot_results (bool): If True, generates and shows the result plots.
+        check_pixel (tuple): (Y, X) coordinates for the single pixel plot.
+    """
+    
+    # --- 1. Set up data and parameters ---
+    x_data = data_object.en
+    
+    if crop_rect is None:
+        # Use full map
+        crop_rect = (slice(None), slice(None))
+        
+    y_data_cube = data_object.LIY[:, crop_rect[0], crop_rect[1]] * scale_factor
+
+    N_E, N_Y, N_X = y_data_cube.shape
+
+    print(f"--- Analyzing Data Object ---")
+    print(f"x_data shape: {x_data.shape}")
+    print(f"Cropped y_data_cube shape: {y_data_cube.shape} (Y={N_Y}, X={N_X})")
+
+    # Set default p0 and bounds if not provided
+    if p0 is None:
+        p0 = [3, -0.8, 3, 0.5, 0.1, 0, 0, 0.2, 0]
+    if bounds is None:
+        bounds = ([0, -2, 0, 0, 0.01, 0, -0.1, 0, -1], 
+                  [100, 0, 100, 2, 1.0, 10, 0.5, 1, 1])
+
+    # --- 2. Run the fit ---
+    print("Starting fit... (This may take a while)")
+    param_map, error_map, liy_fitted_cube = fit_sts_map(x_data, y_data_cube, sts_model, p0, bounds)
+    print("Fit complete.")
+    
+    # --- 3. Attach results to the data object ---
+    data_object.param_map = param_map
+    data_object.error_map = error_map
+    data_object.liy_fitted = liy_fitted_cube
+    data_object.liy_residual = y_data_cube - liy_fitted_cube # Calculate residuals
+    
+    # Attach individual parameter maps
+    data_object.amp_L = data_object.param_map[:, :, 0]
+    data_object.edge_L = data_object.param_map[:, :, 1]
+    data_object.amp_R = data_object.param_map[:, :, 2]
+    data_object.edge_R = data_object.param_map[:, :, 3]
+    data_object.broadening = data_object.param_map[:, :, 4]
+    data_object.bump_amp = data_object.param_map[:, :, 5]
+    data_object.bump_pos = data_object.param_map[:, :, 6]
+    data_object.bump_width = data_object.param_map[:, :, 7]
+    data_object.offset = data_object.param_map[:, :, 8]
+    data_object.gap_map = data_object.edge_R - data_object.edge_L
+    
+    print("Results attached to data object.")
+
+    # --- 4. Visualize the results (if requested) ---
+    if plot_results:
+        print("Generating plots...")
+        fig, axes = plt.subplots(1, 5, figsize=(15, 3))
+        
+        # Plot Gap Map
+        im0 = axes[0].imshow(data_object.gap_map, origin='lower', aspect='equal', cmap=cmap, 
+                             extent=[0, N_X, 0, N_Y])
+        axes[0].set_title("Fitted Gap Size (edge_R - edge_L)")
+        fig.colorbar(im0, ax=axes[0], label="Gap (V)")
+
+        # Plot Bump Amplitude Map
+        im1 = axes[1].imshow(data_object.bump_amp, origin='lower', aspect='equal', cmap=cmap, 
+                             extent=[0, N_X, 0, N_Y])
+        axes[1].set_title("Fitted Bump Amplitude")
+        fig.colorbar(im1, ax=axes[1], label="Amplitude (a.u.)")
+
+        # Plot Error Map
+        im2 = axes[2].imshow(data_object.error_map, origin='lower', aspect='equal', cmap=cmap, 
+                             extent=[0, N_X, 0, N_Y])
+        axes[2].set_title("Fit Error (sqrt(sum(diag(pcov))))")
+        fig.colorbar(im2, ax=axes[2], label="Error (a.u.)")
+        
+        im3 = axes[3].imshow(data_object.edge_L, origin='lower', aspect='equal', cmap=cmap,
+                             extent=[0, N_X, 0, N_Y])
+        axes[3].set_title("Fitted Valence Band Edge (edge_L)")
+        fig.colorbar(im3, ax=axes[3], label="Energy (V)")
+
+        im4 = axes[4].imshow(data_object.edge_R, origin='lower', aspect='equal', cmap=cmap,
+                             extent=[0, N_X, 0, N_Y])
+        axes[4].set_title("Fitted Conduction Band Edge (edge_R)")
+        fig.colorbar(im4, ax=axes[4], label="Energy (V)")
+
+        plt.tight_layout()
+        plt.show()
+
+        # 5. VISUALIZE A SINGLE PIXEL FIT (to check)
+        px_i, px_j = check_pixel
+        
+        # Check if pixel is within the fitted map
+        if px_i < N_Y and px_j < N_X:
+            y_raw_pixel = y_data_cube[:, px_i, px_j]
+            y_fit_pixel = data_object.liy_fitted[:, px_i, px_j]
+            fitted_params = data_object.param_map[px_i, px_j, :]
+            
+            # 2 axes plot
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4), sharex=True)
+            ax1.plot(x_data, y_raw_pixel, 'k-', alpha=0.3, label=f'Raw Data (pixel {px_i}, {px_j})')
+            ax1.plot(x_data, y_fit_pixel, 'r--', lw=2, label='Fit')
+
+            ax2.plot(x_data, y_raw_pixel - y_fit_pixel, 'b-', alpha=0.7, label='Residual')
+            ax2.axhline(0, color='gray', linestyle='--', lw=1)
+            ax2.set_ylabel("Residual (LIY units)")
+            ax2.set_xlabel("Energy (V)")
+            # Check if fit was successful before indexing params
+            if not np.all(np.isnan(fitted_params)):
+                ax1.set_title(f"Single Pixel Fit Check (Gap: {fitted_params[3]-fitted_params[1]:.2f} V)")
+            else:
+                ax1.set_title(f"Single Pixel Fit Check (pixel {px_i}, {px_j}) - Fit Failed")
+
+            ax1.legend()
+            ax1.set_xlabel("Energy (V)")
+            ax1.set_ylabel("LIY (scaled)")
+            plt.show()
+        else:
+            print(f"Check pixel ({px_i}, {px_j}) is outside the bounds of the fitted map ({N_Y}, {N_X}). Skipping pixel plot.")
+            
+    print("--- Analysis complete ---")
+
+
+def animate_ldos_with_topo(data, plot_range=None, interval=80, repeat=True,
+                           use_global_ylim=False, cmap=stmpy.cm.Blues_r,
                            start_ij=(0,0), click_to_jump=True):
     """
     Show topo on the left and LDOS(E) on the right; animate across all spatial pixels.
@@ -594,9 +832,11 @@ def animate_ldos_with_topo(data, interval=80, repeat=True,
 
     Parameters
     ----------
-    en : (E,) array
-    LIY_3d : (E, I, J) array
-    topo_2d : (I, J) array
+    data
+        en : (E,) array
+        LIY_3d : (E, I, J) array
+        topo_2d : (I, J) array
+    plot_range
     interval : ms between frames
     repeat : loop animation
     use_global_ylim : fix y-limits from global min/max for steadier view
@@ -604,11 +844,26 @@ def animate_ldos_with_topo(data, interval=80, repeat=True,
     start_ij : starting (i, j) index
     click_to_jump : click on topo to jump to that pixel’s spectrum
     """
-    LIY_3d = np.asarray(data.LIY)
-    LIY_smoothed = np.asarray(data.LIY_smoothed)
-    LIY_fitted = np.asarray(data.liy_fitted)*1e-12
+    if plot_range is None:
+        LIY_3d = np.asarray(data.LIY)
+        LIY_smoothed = np.asarray(data.LIY_smoothed)
+        LIY_fitted = np.asarray(data.liy_fitted)*1e-12
+        topo_2d = np.asarray(data.Z_ls)
+        edge_L = np.asarray(data.edge_L)
+        edge_R = np.asarray(data.edge_R)
+        bump_amp = np.asarray(data.bump_amp)
+        bump_pos = np.asarray(data.bump_pos)
+    else:
+        LIY_3d = np.asarray(data.LIY)[:, plot_range[0]:plot_range[1], plot_range[2]:plot_range[3]]
+        LIY_smoothed = np.asarray(data.LIY_smoothed)[:, plot_range[0]:plot_range[1], plot_range[2]:plot_range[3]]
+        LIY_fitted = np.asarray(data.liy_fitted)[:, plot_range[0]:plot_range[1], plot_range[2]:plot_range[3]]*1e-12
+        topo_2d = np.asarray(data.Z_ls)[plot_range[0]:plot_range[1], plot_range[2]:plot_range[3]]
+        edge_L = np.asarray(data.edge_L)[plot_range[0]:plot_range[1], plot_range[2]:plot_range[3]]
+        edge_R = np.asarray(data.edge_R)[plot_range[0]:plot_range[1], plot_range[2]:plot_range[3]]
+        bump_amp = np.asarray(data.bump_amp)[plot_range[0]:plot_range[1], plot_range[2]:plot_range[3]]
+        bump_pos = np.asarray(data.bump_pos)[plot_range[0]:plot_range[1], plot_range[2]:plot_range[3]]
     en = np.asarray(data.en)
-    topo_2d = np.asarray(data.Z_ls)
+   
 
     assert LIY_3d.ndim == 3 and topo_2d.ndim == 2, "Shapes: LIY (E,I,J), topo (I,J)"
     E, I, J = LIY_3d.shape
@@ -619,25 +874,68 @@ def animate_ldos_with_topo(data, interval=80, repeat=True,
     start_frame = ij_list.index((start_i, start_j))
 
     # Figure layout
-    fig, [ax_topo, ax_spec] = plt.subplots(1, 2, figsize=(15, 5))
+
+    fig = plt.figure(figsize=(25, 5))
+
+    # 2 rows × 6 columns
+    gs = gridspec.GridSpec(
+        nrows=2, ncols=6,
+        height_ratios=[1, 1],
+        width_ratios=[1, 1, 1, 1, 1, 1]
+    )
+
+    # First five axes span BOTH rows → tall panels
+    ax_topo     = fig.add_subplot(gs[:, 0])
+    ax_edge_L   = fig.add_subplot(gs[:, 1])
+    ax_edge_R   = fig.add_subplot(gs[:, 2])
+    ax_bump_amp = fig.add_subplot(gs[:, 3])
+    ax_bump_pos = fig.add_subplot(gs[:, 4])
+
+    # Last column: one axis per row → same height as maps
+    ax_spec     = fig.add_subplot(gs[0, 5])
+    ax_residual = fig.add_subplot(gs[1, 5])
+
+
 
     # --- Topography
     im = ax_topo.imshow(topo_2d, origin='lower', cmap=cmap, aspect='equal')
     cb = fig.colorbar(im, ax=ax_topo, fraction=0.046, pad=0.04)
-    cb.set_label('Topo (a.u.)')
     ax_topo.set_title("Topography")
-    ax_topo.set_xlabel("j (col)")
-    ax_topo.set_ylabel("i (row)")
+
+    # --- Edge L
+    im2 = ax_edge_L.imshow(edge_L, origin='lower', cmap=cmap, aspect='equal')
+    cb2 = fig.colorbar(im2, ax=ax_edge_L, fraction=0.046, pad=0.04)
+    ax_edge_L.set_title("Valence Band Edge (edge_L)")
+
+    # --- Edge R
+    im3 = ax_edge_R.imshow(edge_R, origin='lower', cmap=cmap, aspect='equal')
+    cb3 = fig.colorbar(im3, ax=ax_edge_R, fraction=0.046, pad=0.04)
+    ax_edge_R.set_title("Conduction Band Edge (edge_R)")
+    # --- Bump Amplitude
+    im4 = ax_bump_amp.imshow(bump_amp, origin='lower', cmap=cmap, aspect='equal')
+    cb4 = fig.colorbar(im4, ax=ax_bump_amp, fraction=0.046, pad=0.04)
+    ax_bump_amp.set_title("Bump Amplitude")
+    # --- Bump Position
+    im5 = ax_bump_pos.imshow(bump_pos, origin='lower', cmap=cmap, aspect='equal')
+    cb5 = fig.colorbar(im5, ax=ax_bump_pos, fraction=0.046, pad=0.04)
+    ax_bump_pos.set_title("Bump Position")
 
     # Marker at (start_i, start_j). Note imshow uses x=j, y=i.
-    marker = ax_topo.scatter([start_j], [start_i], s=80, facecolors='none',
+    marker_topo = ax_topo.scatter([start_j], [start_i], s=80, facecolors='none',
+                             edgecolors='r', linewidths=1.8)
+    marker_edge_L = ax_edge_L.scatter([start_j], [start_i], s=80, facecolors='none',
+                             edgecolors='r', linewidths=1.8)
+    marker_edge_R = ax_edge_R.scatter([start_j], [start_i], s=80, facecolors='none',
+                             edgecolors='r', linewidths=1.8)            
+    marker_bump_amp = ax_bump_amp.scatter([start_j], [start_i], s=80, facecolors='none',
+                             edgecolors='r', linewidths=1.8)            
+    marker_bump_pos = ax_bump_pos.scatter([start_j], [start_i], s=80, facecolors='none',
                              edgecolors='r', linewidths=1.8)
 
     # --- Spectrum
     line, = ax_spec.plot(en, LIY_3d[:, start_i, start_j], color='gray', lw=1.8, label='Raw')
     line_smoothed, = ax_spec.plot(en, LIY_smoothed[:, start_i, start_j]+1e-12, color='blue', lw=1.8, label='Smoothed')
     line_fitted, = ax_spec.plot(en, LIY_fitted[:, start_i, start_j]+2e-12, color='red', lw=1.8, label='Fitted')
-    ax_spec.set_xlabel("Bias (V)")
     ax_spec.set_ylabel("dI/dV (a.u.)")
     ax_spec.legend()
     title_spec = ax_spec.set_title(f"LDOS at (i,j)=({start_i},{start_j})")
@@ -651,14 +949,24 @@ def animate_ldos_with_topo(data, interval=80, repeat=True,
             ymin, ymax = -1, 1
         ax_spec.set_ylim(ymin, ymax)
 
+    # --- Residuals
+    residuals = LIY_3d - LIY_fitted
+    line_residual, = ax_residual.plot(en, residuals[:, start_i, start_j], color='gray', lw=1.8)
+    ax_residual.set_xlabel("Bias (V)")
+    ax_residual.set_ylabel("Residuals (a.u.)")
+    ax_residual.axhline(0, color='black', lw=0.8, ls='--')
+    ax_residual.set_ylim(-np.nanmax(np.abs(residuals)), np.nanmax(np.abs(residuals)))
+
+    plt.tight_layout()
+    plt.show()
     # --- Update function
     def update(frame):
         i, j = ij_list[frame]
         # update spectrum
-        y = LIY_3d[:, i, j]
-        line.set_ydata(y)
+        line.set_ydata(LIY_3d[:, i, j])
         line_fitted.set_ydata(LIY_fitted[:, i, j])
         line_smoothed.set_ydata(LIY_smoothed[:, i, j])
+        line_residual.set_ydata(LIY_3d[:, i, j] - LIY_fitted[:, i, j])
         
         title_spec.set_text(f"LDOS at (i,j)=({i},{j})")
         txt.set_text(f"({i},{j})")
@@ -667,8 +975,12 @@ def animate_ldos_with_topo(data, interval=80, repeat=True,
             ax_spec.autoscale_view()
 
         # move marker
-        marker.set_offsets([[j, i]])
-        return line, marker, title_spec, txt
+        marker_topo.set_offsets([[j, i]])
+        marker_edge_L.set_offsets([[j, i]])
+        marker_edge_R.set_offsets([[j, i]])
+        marker_bump_amp.set_offsets([[j, i]])
+        marker_bump_pos.set_offsets([[j, i]])
+        return line, marker_topo, marker_edge_L, marker_edge_R, marker_bump_amp, marker_bump_pos, title_spec, txt
 
     anim = FuncAnimation(fig, update, frames=len(ij_list),
                          interval=interval, blit=False, repeat=repeat)
