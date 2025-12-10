@@ -116,7 +116,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                              colorbar_range=None,
                              colorbar_range_ps=None,
                              add_label=True,
-                             savepath=None, savename=None, show=True, return_figs=False, silent=True):
+                             savepath=None, savename=None, make_plots=True, show=True, return_figs=False, silent=True):
     """
     Parameters
     ----------
@@ -157,92 +157,90 @@ def add_corrections_and_plot(data, dos_map: bool = False,
     k_crop_n = 0 if k_crop_n < 0 else k_crop_n
     
     if hasattr(data, "Z_BWD"):
-        fig_topo, ax_topo = plt.subplots(2, 7, figsize=(23, 10))
-        ax_topo[0,0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,0].set_title('Raw Z')
-        ax_topo[0,1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,1].set_title('Global Corrected Z')
-        ax_topo[0,2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,2].set_title('Local Corrected Z')
-        ax_topo[0,3].imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,3].set_title('Line Subtracted Z')
-        ax_topo[0,4].imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,4].set_title('Plane Subtracted Z')
-        
         data.Z_BWD_gc, data.Z_BWD_lc, data.Z_BWD_ls, data.FZ_BWD_ls, data.Z_BWD_ps, data.FZ_BWD_ps = _process_pipeline(data.Z_BWD)
         data.FZ_BWD_ls = stmpy.tools.fft(data.Z_BWD_ls, zeroDC=True, window='hanning', units='amplitude', output='absolute')
+        if make_plots:
+            fig_topo, ax_topo = plt.subplots(2, 7, figsize=(23, 10))
+            ax_topo[0,0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,0].set_title('Raw Z')
+            ax_topo[0,1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,1].set_title('Global Corrected Z')
+            ax_topo[0,2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,2].set_title('Local Corrected Z')
+            ax_topo[0,3].imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,3].set_title('Line Subtracted Z')
+            ax_topo[0,4].imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,4].set_title('Plane Subtracted Z')
+        
+            ax_topo[1,0].imshow(data.Z_BWD,     cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[1,0].set_title('Raw Z BWD')
+            ax_topo[1,1].imshow(data.Z_BWD_gc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[1,1].set_title('Global Corrected Z BWD')
+            ax_topo[1,2].imshow(data.Z_BWD_lc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[1,2].set_title('Local Corrected Z BWD')
+            ax_topo[1,3].imshow(data.Z_BWD_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range); ax_topo[1,3].set_title('Line Subtracted Z BWD')
+            ax_topo[1,4].imshow(data.Z_BWD_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps); ax_topo[1,4].set_title('Plane Subtracted Z BWD')
 
-        ax_topo[1,0].imshow(data.Z_BWD,     cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[1,0].set_title('Raw Z BWD')
-        ax_topo[1,1].imshow(data.Z_BWD_gc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[1,1].set_title('Global Corrected Z BWD')
-        ax_topo[1,2].imshow(data.Z_BWD_lc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[1,2].set_title('Local Corrected Z BWD')
-        ax_topo[1,3].imshow(data.Z_BWD_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range); ax_topo[1,3].set_title('Line Subtracted Z BWD')
-        ax_topo[1,4].imshow(data.Z_BWD_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps); ax_topo[1,4].set_title('Plane Subtracted Z BWD')
+            for i in range(2):
+                for j in range(7):
+                    ax_topo[i,j].set_xlabel('')
+                    ax_topo[i,j].set_ylabel('')
+                    # aspect ratio
+                    ax_topo[i,j].set_aspect('equal')    
+                        
+                    if j < 5:
+                        if r_crop_n > 0:
+                            # make a white dashed square to indicate cropped region
+                            h, w = data.Z.shape
+                            rect = patches.Rectangle((r_crop_n, r_crop_n), w - 2*r_crop_n, h - 2*r_crop_n, linewidth=1, edgecolor='w', facecolor='none')
+                        elif r_box_center is not None and r_box_size is not None:
+                            cx, cy = r_box_center
+                            sx, sy = np.array(r_box_size) / 2
+                            rect = patches.Rectangle((cx - sx, cy - sy), 2*sx, 2*sy, linewidth=1, edgecolor='w', facecolor='none')
+                            ax_topo[i,j].add_patch(rect)
+                        ax_topo[i,j].set_axis_off()
+                        stmpy.image.add_scale_bar(5, scan_size, n_pixels, fs=12, ax=ax_topo[i,j])
+                        if add_colorbar:
+                            stmpy.image.add_colorbar(ax=ax_topo[i,j], label='Topography (m)', fs=8)
+                        if add_label:
+                            stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i,j], fs=8)
 
-        for i in range(2):
-            for j in range(7):
-                ax_topo[i,j].set_xlabel('')
-                ax_topo[i,j].set_ylabel('')
-                # aspect ratio
-                ax_topo[i,j].set_aspect('equal')
-                
-                    
-                if j < 5:
-                    if r_crop_n > 0:
-                        # make a white dashed square to indicate cropped region
-                        h, w = data.Z.shape
-                        rect = patches.Rectangle((r_crop_n, r_crop_n), w - 2*r_crop_n, h - 2*r_crop_n, linewidth=1, edgecolor='w', facecolor='none')
-                    elif r_box_center is not None and r_box_size is not None:
-                        cx, cy = r_box_center
-                        sx, sy = np.array(r_box_size) / 2
-                        rect = patches.Rectangle((cx - sx, cy - sy), 2*sx, 2*sy, linewidth=1, edgecolor='w', facecolor='none')
-                        ax_topo[i,j].add_patch(rect)
-                    ax_topo[i,j].set_axis_off()
-                    stmpy.image.add_scale_bar(5, scan_size, n_pixels, fs=12, ax=ax_topo[i,j])
-                    if add_colorbar:
-                        stmpy.image.add_colorbar(ax=ax_topo[i,j], label='Topography (m)', fs=8)
-                    if add_label:
-                        stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i,j], fs=8)
-
-        plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[0,5], add_colorbar=add_colorbar)
-        plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[0,6], add_colorbar=add_colorbar)
-        plot_FFT_data(data.FZ_BWD_ls, k_crop_n=k_crop_n, ax=ax_topo[1,5], add_colorbar=add_colorbar)
-        plot_FFT_data(data.FZ_BWD_ls, k_crop_n=0, ax=ax_topo[1,6], add_colorbar=add_colorbar)
+            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[0,5], add_colorbar=add_colorbar)
+            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[0,6], add_colorbar=add_colorbar)
+            plot_FFT_data(data.FZ_BWD_ls, k_crop_n=k_crop_n, ax=ax_topo[1,5], add_colorbar=add_colorbar)
+            plot_FFT_data(data.FZ_BWD_ls, k_crop_n=0, ax=ax_topo[1,6], add_colorbar=add_colorbar)
     else:
-        fig_topo, ax_topo = plt.subplots(1, 7, figsize=(23, 5))
+        if make_plots:
+            fig_topo, ax_topo = plt.subplots(1, 7, figsize=(23, 5))
 
-        ax_topo[0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0].set_title('Raw Z')
-        ax_topo[1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[1].set_title('Global Corrected Z')
-        ax_topo[2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[2].set_title('Local Corrected Z')
-        ax_topo[3].imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range); ax_topo[3].set_title('Line Subtracted Z')
-        ax_topo[4].imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps); ax_topo[4].set_title('Plane Subtracted Z')
+            ax_topo[0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0].set_title('Raw Z')
+            ax_topo[1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[1].set_title('Global Corrected Z')
+            ax_topo[2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[2].set_title('Local Corrected Z')
+            ax_topo[3].imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range); ax_topo[3].set_title('Line Subtracted Z')
+            ax_topo[4].imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps); ax_topo[4].set_title('Plane Subtracted Z')
 
-        for i, a in enumerate(ax_topo): 
-            a.set_xlabel('')
-            a.set_ylabel('')
-            a.set_aspect('equal')
-            if i < 5:
-                a.set_axis_off()
-                stmpy.image.add_scale_bar(5, scan_size, n_pixels, fs=12,  ax=a)
-                if add_colorbar:
-                        stmpy.image.add_colorbar(ax=ax_topo[i], label='Topography (m)', fs=8)
-                if add_label:
-                        stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i], fs=8)
+            for i, a in enumerate(ax_topo): 
+                a.set_xlabel('')
+                a.set_ylabel('')
+                a.set_aspect('equal')
+                if i < 5:
+                    a.set_axis_off()
+                    stmpy.image.add_scale_bar(5, scan_size, n_pixels, fs=12,  ax=a)
+                    if add_colorbar:
+                            stmpy.image.add_colorbar(ax=ax_topo[i], label='Topography (m)', fs=8)
+                    if add_label:
+                            stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i], fs=8)
 
+            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[5])
+            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[6])
 
-        plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[5])
-        plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[6])
-
-
-    fig_topo.tight_layout()
-    #add title
-    if not dos_map:
-        scan_offset = data.header['scan_offset']
-        scan_angle = data.header['scan_angle']
-        fig_topo.suptitle(data.info_str + ' (' + f'{scan_offset[0]*1e9:.2f}, {scan_offset[1]*1e9:.2f})nm, {scan_angle} deg', fontsize=16)
-
-
-    figs['topo'] = (fig_topo, ax_topo)
+    if make_plots:
+        fig_topo.tight_layout()
+        #add title
+        if not dos_map:
+            scan_offset = data.header['scan_offset']
+            scan_angle = data.header['scan_angle']
+            fig_topo.suptitle(data.info_str + ' (' + f'{scan_offset[0]*1e9:.2f}, {scan_offset[1]*1e9:.2f})nm, {scan_angle} deg', fontsize=16)
+        figs['topo'] = (fig_topo, ax_topo)
 
     # --- DOS map (dI/dV) corrections & plots ---
     if dos_map:
         if not hasattr(data, 'LIY'):
             raise AttributeError("dos_map=True but `data.LIY` not found.")
         # Corrections on the full energy stack
+        data.LIY_smoothed = smooth_LIY(data.LIY, window=10, axis=0, mode='reflect')
         data.LIY_gc = stmpy.tools.nsigma_global(data.LIY, n=3, M=3, repeat=2)
         data.LIY_lc = stmpy.tools.nsigma_local(data.LIY_gc, n=3, N=4, M=3, repeat=2)
 
@@ -251,59 +249,60 @@ def add_corrections_and_plot(data, dos_map: bool = False,
         mean_gc  = np.mean(data.LIY_gc, axis=0)
         mean_lc  = np.mean(data.LIY_lc, axis=0)
 
-        fig_dm, ax_dm = plt.subplots(1, 3, figsize=(15, 5))
-        ax_dm[0].imshow(mean_raw, origin='lower',                        
-                        cmap=stmpy.cm.Blues)
-        ax_dm[0].set_title('Raw dI/dV at mean V')
-        ax_dm[1].imshow(mean_gc, origin='lower', 
-                        
-                        cmap=stmpy.cm.Blues)
-        ax_dm[1].set_title('Global Corrected dI/dV at mean V')
-        ax_dm[2].imshow(mean_lc, origin='lower', 
-                        cmap=stmpy.cm.Blues)
-        ax_dm[2].set_title('Local Corrected dI/dV at mean V')
-        for a in ax_dm: 
-            a.set_axis_off()
-            stmpy.image.add_scale_bar(5, scan_size, n_pixels, fs=12, ax=a)
-        fig_dm.tight_layout()
-        figs['dos_mean'] = (fig_dm, ax_dm)
+        if make_plots:
+            fig_dm, ax_dm = plt.subplots(1, 3, figsize=(15, 5))
+            ax_dm[0].imshow(mean_raw, origin='lower',                        
+                            cmap=stmpy.cm.Blues)
+            ax_dm[0].set_title('Raw dI/dV at mean V')
+            ax_dm[1].imshow(mean_gc, origin='lower', 
+                            
+                            cmap=stmpy.cm.Blues)
+            ax_dm[1].set_title('Global Corrected dI/dV at mean V')
+            ax_dm[2].imshow(mean_lc, origin='lower', 
+                            cmap=stmpy.cm.Blues)
+            ax_dm[2].set_title('Local Corrected dI/dV at mean V')
+            for a in ax_dm: 
+                a.set_axis_off()
+                stmpy.image.add_scale_bar(5, scan_size, n_pixels, fs=12, ax=a)
+            fig_dm.tight_layout()
+            figs['dos_mean'] = (fig_dm, ax_dm)
 
-        if idx is not None:
-          # Single energy slice
-          nE = data.LIY.shape[0]
-          idx = int(np.clip(idx, 0, nE - 1))
-          # Energies if present; otherwise index-based label
-          if hasattr(data, 'en') and getattr(data, 'en') is not None and len(data.en) == nE:
-              en_label = f"{data.en[idx]:.2f} V"
-          else:
-              en_label = f"index {idx}"
+            if idx is not None:
+                # Single energy slice
+                nE = data.LIY.shape[0]
+                idx = int(np.clip(idx, 0, nE - 1))
+                # Energies if present; otherwise index-based label
+                if hasattr(data, 'en') and getattr(data, 'en') is not None and len(data.en) == nE:
+                    en_label = f"{data.en[idx]:.2f} V"
+                else:
+                    en_label = f"index {idx}"
 
-          fig_ds, ax_ds = plt.subplots(1, 3, figsize=(15, 5))
-          ax_ds[0].imshow(data.LIY[idx], origin='lower', cmap=stmpy.cm.Blues)
-          ax_ds[0].set_title(f'Raw dI/dV at {en_label}')
-          ax_ds[1].imshow(data.LIY_gc[idx], origin='lower', cmap=stmpy.cm.Blues)
-          ax_ds[1].set_title(f'Global Corrected dI/dV at {en_label}')
-          ax_ds[2].imshow(data.LIY_lc[idx], origin='lower', cmap=stmpy.cm.Blues)
-          ax_ds[2].set_title(f'Local Corrected dI/dV at {en_label}')
-          for a in ax_ds: 
-             a.set_axis_off()
-             stmpy.image.add_scale_bar(5, scan_size, n_pixels, fs=12,  ax=a)
-          fig_ds.tight_layout()
-          figs['dos_idx'] = (fig_ds, ax_ds)
+                fig_ds, ax_ds = plt.subplots(1, 3, figsize=(15, 5))
+                ax_ds[0].imshow(data.LIY[idx], origin='lower', cmap=stmpy.cm.Blues)
+                ax_ds[0].set_title(f'Raw dI/dV at {en_label}')
+                ax_ds[1].imshow(data.LIY_gc[idx], origin='lower', cmap=stmpy.cm.Blues)
+                ax_ds[1].set_title(f'Global Corrected dI/dV at {en_label}')
+                ax_ds[2].imshow(data.LIY_lc[idx], origin='lower', cmap=stmpy.cm.Blues)
+                ax_ds[2].set_title(f'Local Corrected dI/dV at {en_label}')
+                for a in ax_ds: 
+                    a.set_axis_off()
+                    stmpy.image.add_scale_bar(5, scan_size, n_pixels, fs=12,  ax=a)
+                fig_ds.tight_layout()
+                figs['dos_idx'] = (fig_ds, ax_ds)
 
-    if savename is not None:
-        savename = data.info_str + "_" + savename.replace(".sm4", "") +  ".pdf"
-        fig_topo.savefig(savepath+'/'+savename)
-        if not silent:
-            print(f"Saved topo figure to {savepath+'/'+savename}")
+        if savename is not None:
+            savename = data.info_str + "_" + savename.replace(".sm4", "") +  ".pdf"
+            fig_topo.savefig(savepath+'/'+savename)
+            if not silent:
+                print(f"Saved topo figure to {savepath+'/'+savename}")
 
-    if show:
-        plt.show()
-    else:
-        plt.close('all')
+        if show:
+            plt.show()
+        else:
+            plt.close('all')
 
-    if return_figs:
-        return figs
+        if return_figs:
+            return figs
     
 
 
