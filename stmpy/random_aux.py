@@ -116,7 +116,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                              colorbar_range=None,
                              colorbar_range_ps=None,
                              add_label=True,
-                             savepath=None, savename=None, make_plots=True, show=True, return_figs=False, silent=True):
+                             savepath=None, savename=None, make_plots=True, show=True, return_figs=False, silent=True, RHK_format=True):
     """
     Parameters
     ----------
@@ -230,9 +230,12 @@ def add_corrections_and_plot(data, dos_map: bool = False,
         fig_topo.tight_layout()
         #add title
         if not dos_map:
-            scan_offset = data.header['scan_offset']
-            scan_angle = data.header['scan_angle']
-            fig_topo.suptitle(data.info_str + ' (' + f'{scan_offset[0]*1e9:.2f}, {scan_offset[1]*1e9:.2f})nm, {scan_angle} deg', fontsize=16)
+            if not RHK_format:
+                scan_offset = data.header['scan_offset']
+                scan_angle = data.header['scan_angle']
+                fig_topo.suptitle(data.info_str + ' (' + f'{scan_offset[0]*1e9:.2f}, {scan_offset[1]*1e9:.2f})nm, {scan_angle} deg', fontsize=16)
+            else:
+                fig_topo.suptitle(data.info_str, fontsize=16)
         figs['topo'] = (fig_topo, ax_topo)
 
     # --- DOS map (dI/dV) corrections & plots ---
@@ -252,14 +255,14 @@ def add_corrections_and_plot(data, dos_map: bool = False,
         if make_plots:
             fig_dm, ax_dm = plt.subplots(1, 3, figsize=(15, 5))
             ax_dm[0].imshow(mean_raw, origin='lower',                        
-                            cmap=stmpy.cm.Blues)
+                            cmap=stmpy.cm.Blues_r)
             ax_dm[0].set_title('Raw dI/dV at mean V')
             ax_dm[1].imshow(mean_gc, origin='lower', 
                             
-                            cmap=stmpy.cm.Blues)
+                            cmap=stmpy.cm.Blues_r)
             ax_dm[1].set_title('Global Corrected dI/dV at mean V')
             ax_dm[2].imshow(mean_lc, origin='lower', 
-                            cmap=stmpy.cm.Blues)
+                            cmap=stmpy.cm.Blues_r)
             ax_dm[2].set_title('Local Corrected dI/dV at mean V')
             for a in ax_dm: 
                 a.set_axis_off()
@@ -278,11 +281,11 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                     en_label = f"index {idx}"
 
                 fig_ds, ax_ds = plt.subplots(1, 3, figsize=(15, 5))
-                ax_ds[0].imshow(data.LIY[idx], origin='lower', cmap=stmpy.cm.Blues)
+                ax_ds[0].imshow(data.LIY[idx], origin='lower', cmap=stmpy.cm.Blues_r)
                 ax_ds[0].set_title(f'Raw dI/dV at {en_label}')
-                ax_ds[1].imshow(data.LIY_gc[idx], origin='lower', cmap=stmpy.cm.Blues)
+                ax_ds[1].imshow(data.LIY_gc[idx], origin='lower', cmap=stmpy.cm.Blues_r)
                 ax_ds[1].set_title(f'Global Corrected dI/dV at {en_label}')
-                ax_ds[2].imshow(data.LIY_lc[idx], origin='lower', cmap=stmpy.cm.Blues)
+                ax_ds[2].imshow(data.LIY_lc[idx], origin='lower', cmap=stmpy.cm.Blues_r)
                 ax_ds[2].set_title(f'Local Corrected dI/dV at {en_label}')
                 for a in ax_ds: 
                     a.set_axis_off()
@@ -350,9 +353,9 @@ def plot_correlation(data1, data2, xlabel=None, ylabel=None):
         r = float((xzc * yzc).sum() / denom) if denom > 0 else np.nan
 
     fig, ax = plt.subplots(1, 3, figsize=(12, 4))
-    ax[0].imshow(data1, origin='lower', cmap=stmpy.cm.Blues)
+    ax[0].imshow(data1, origin='lower', cmap=stmpy.cm.Blues_r)
     ax[0].set_title(xlabel if xlabel is not None else 'Data 1')
-    ax[1].imshow(data2, origin='lower', cmap=stmpy.cm.Blues)
+    ax[1].imshow(data2, origin='lower', cmap=stmpy.cm.Blues_r)
     ax[1].set_title(ylabel if ylabel is not None else 'Data 2')
     ax[2].scatter(xm, ym, s=10, alpha=0.7)
     if xlabel is not None:
@@ -484,9 +487,9 @@ def compute_shape_params(
         plot_rk_space(data, ens=[e0, e1, e2, e3, e4, e5])
         
         # fig, ax = plt.subplots(1, 2, figsize=(12, 5))
-        # ax[0].imshow(sp1, cmap=stmpy.cm.Blues)
+        # ax[0].imshow(sp1, cmap=stmpy.cm.Blues_r)
         # ax[0].set_title('Shape Para 1')
-        # ax[1].imshow(sp2, cmap=stmpy.cm.Blues)
+        # ax[1].imshow(sp2, cmap=stmpy.cm.Blues_r)
         # ax[1].set_title('Shape Para 2')
         # plt.tight_layout()
         # plt.show()
@@ -1026,19 +1029,19 @@ def plot_rk_space(data, ens=None):
      # in nm
     n_pixels = data.scan_info['n_pixels']    # number of pixels along one axis
 
-    ax[0,0].imshow(data.Z_ls, origin='lower',  cmap=stmpy.cm.Blues)
+    ax[0,0].imshow(data.Z_ls, origin='lower',  cmap=stmpy.cm.Blues_r)
     ax[0,0].set_title('Z line subtracted')
 
     data.FZ_ls = stmpy.tools.fft(data.Z_ls, zeroDC=True, units='amplitude', output='absolute')
     plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax[1,0])
 
-    ax[0,1].imshow(data.shape_para1, origin='lower', cmap=stmpy.cm.Blues)
+    ax[0,1].imshow(data.shape_para1, origin='lower', cmap=stmpy.cm.Blues_r)
     ax[0,1].set_title('Shape Parameter 1')
 
     data.Fshape_para1 = stmpy.tools.fft(data.shape_para1, zeroDC=True, units='amplitude', output='absolute')
     plot_FFT_data(data.Fshape_para1, k_crop_n=0, ax=ax[1,1])
 
-    ax[0,2].imshow(data.shape_para2, origin='lower', cmap=stmpy.cm.Blues)
+    ax[0,2].imshow(data.shape_para2, origin='lower', cmap=stmpy.cm.Blues_r)
     ax[0,2].set_title('Shape Parameter 2')
 
     data.Fshape_para2 = stmpy.tools.fft(data.shape_para2, zeroDC=True, units='amplitude', output='absolute')
@@ -1048,7 +1051,7 @@ def plot_rk_space(data, ens=None):
         for en_id, en in enumerate(ens):
             # print(en_id)
             id = np.argmin(np.abs(data.en - en))
-            ax[0,3+en_id].imshow(data.LIY[id,:,:], origin='lower', cmap=stmpy.cm.Blues)
+            ax[0,3+en_id].imshow(data.LIY[id,:,:], origin='lower', cmap=stmpy.cm.Blues_r)
             ax[0,3+en_id].set_title(f'dI/dV at {en:.2f} V')
             FLIY_idx = stmpy.tools.fft(data.LIY[id,:,:], zeroDC=True, units='amplitude', output='absolute')
             plot_FFT_data(FLIY_idx, k_crop_n=0, ax=ax[1,3+en_id])
