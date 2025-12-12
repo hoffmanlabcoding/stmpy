@@ -293,19 +293,19 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                 fig_ds.tight_layout()
                 figs['dos_idx'] = (fig_ds, ax_ds)
 
-        if savename is not None:
-            savename = data.info_str + "_" + savename.replace(".sm4", "") +  ".pdf"
-            fig_topo.savefig(savepath+'/'+savename)
-            if not silent:
-                print(f"Saved topo figure to {savepath+'/'+savename}")
+    if savename is not None:
+        savename = data.info_str + "_" + savename.replace(".sm4", "") +  ".pdf"
+        fig_topo.savefig(savepath+'/'+savename)
+        if not silent:
+            print(f"Saved topo figure to {savepath+'/'+savename}")
 
-        if show:
-            plt.show()
-        else:
-            plt.close('all')
+    if show:
+        plt.show()
+    else:
+        plt.close('all')
 
-        if return_figs:
-            return figs
+    if return_figs:
+        return figs
     
 
 
