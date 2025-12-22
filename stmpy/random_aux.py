@@ -18,7 +18,7 @@ import stmpy
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.animation import FuncAnimation
-
+from matplotlib.colors import TwoSlopeNorm
 from scipy.optimize import curve_fit, OptimizeWarning
 from tqdm import tqdm  # For a progress bar
 import warnings
@@ -1071,3 +1071,279 @@ def plot_histogram(data):
     plt.tight_layout()
     plt.show()
 
+
+def cross_correlation_2d_plot(
+    A, B,
+    normalize=True,
+    subtract_mean=True,
+    titleA="A",
+    titleB="B",
+    plot=False,
+    order=1,                  # interpolation order
+    preserve_range=True,
+    anti_aliasing=True,
+):
+    A = np.asarray(A, float)
+    B = np.asarray(B, float)
+
+    if A.ndim != 2 or B.ndim != 2:
+        raise ValueError("A and B must be 2D arrays")
+
+    # -------------------------------------------------
+    # Always resample LOW-res image → HIGH-res image
+    # -------------------------------------------------
+    if A.shape != B.shape:
+        try:
+            from skimage.transform import resize
+        except Exception as e:
+            raise ImportError(
+                "Resampling requires scikit-image. "
+                "Install with: pip install scikit-image"
+            ) from e
+
+        if A.size >= B.size:
+            # A is high-res → resample B
+            target_shape = A.shape
+            B = resize(
+                B, target_shape,
+                order=order,
+                mode="reflect",
+                preserve_range=preserve_range,
+                anti_aliasing=anti_aliasing,
+            )
+            high_res_label = "A"
+        else:
+            # B is high-res → resample A
+            target_shape = B.shape
+            A = resize(
+                A, target_shape,
+                order=order,
+                mode="reflect",
+                preserve_range=preserve_range,
+                anti_aliasing=anti_aliasing,
+            )
+            high_res_label = "B"
+
+    ny, nx = A.shape  # now guaranteed equal
+
+    # --------------------
+    # Mean subtraction
+    # --------------------
+    if subtract_mean:
+        A0 = A - np.nanmean(A)
+        B0 = B - np.nanmean(B)
+    else:
+        A0, B0 = A.copy(), B.copy()
+
+    # FFT-safe NaNs
+    A0 = np.where(np.isfinite(A0), A0, 0.0)
+    B0 = np.where(np.isfinite(B0), B0, 0.0)
+
+    # Zero padding to 2N × 2N
+    A_pad = np.zeros((2 * ny, 2 * nx))
+    B_pad = np.zeros((2 * ny, 2 * nx))
+    A_pad[:ny, :nx] = A0
+    B_pad[:ny, :nx] = B0
+
+    # FFT cross-correlation
+    FA = np.fft.fft2(A_pad)
+    FB = np.fft.fft2(B_pad)
+    C = np.fft.ifft2(FA * np.conj(FB)).real
+    C = np.fft.fftshift(C)
+
+    if normalize:
+        denom = np.sqrt(np.sum(A0 * A0) * np.sum(B0 * B0))
+        if denom > 0:
+            C /= denom
+
+    # Peak detection (max |corr|)
+    iy, ix = np.unravel_index(np.nanargmax(np.abs(C)), C.shape)
+    cy, cx = C.shape[0] // 2, C.shape[1] // 2
+    dy, dx = iy - cy, ix - cx
+    peak_value = C[iy, ix]
+    central_value = C[cy, cx]
+
+    # --------------------
+    # Plot (optional)
+    # --------------------
+    if plot:
+        fig, axs = plt.subplots(1, 3, figsize=(14, 4), constrained_layout=True)
+
+        im0 = axs[0].imshow(A, origin="lower", cmap=stmpy.cm.Blues_r)
+        axs[0].set_title(f"{titleA} ({'high-res' if high_res_label=='A' else 'resampled'})")
+        plt.colorbar(im0, ax=axs[0], fraction=0.046, pad=0.04)
+
+        im1 = axs[1].imshow(B, origin="lower", cmap=stmpy.cm.Blues_r)
+        axs[1].set_title(f"{titleB} ({'high-res' if high_res_label=='B' else 'resampled'})")
+        plt.colorbar(im1, ax=axs[1], fraction=0.046, pad=0.04)
+
+        vmax = np.nanmax(np.abs(C))
+        norm = TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
+        extent = [-cx, cx, -cy, cy]
+
+        im2 = axs[2].imshow(
+            C, origin="lower", extent=extent,
+            cmap=stmpy.cm.jason_r, norm=norm
+        )
+        axs[2].plot(dx, dy, "ko", ms=3)
+        axs[2].axhline(0, ls="--", c="gray")
+        axs[2].axvline(0, ls="--", c="gray")
+        axs[2].set_title(f"Cross-corr (peak={peak_value:.3f})")
+        axs[2].set_xlabel("dx (pixels)")
+        axs[2].set_ylabel("dy (pixels)")
+        plt.colorbar(im2, ax=axs[2], fraction=0.046, pad=0.04)
+
+        plt.show()
+
+    return C, (dy, dx), peak_value, central_value
+
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+def plot_topo_and_energy_energy_correlations_sharedx_square(
+    topo2d,
+    liy3d,
+    en,
+    *,
+    mask=None,
+    idxs=None,
+    energies=None,
+    subtract_mean=True,
+    common_mask_topo=True,
+    common_mask_energy=True,
+    cmap_corr=stmpy.cm.jason_r,
+    title_top="Topo–DOS correlation vs energy",
+    title_bottom="Zero-shift correlation between DOS maps",
+    figsize=(8, 16),
+):
+    topo = np.asarray(topo2d, float)
+    liy = np.asarray(liy3d, float)
+    en = np.asarray(en, float)
+    order = np.argsort(en)
+    en = en[order]
+    liy = liy[order, :, :]
+
+    nE, ny, nx = liy.shape
+    if topo.shape != (ny, nx):
+        raise ValueError("topo2d must match LIY spatial shape")
+
+    if mask is None:
+        mask = np.ones((ny, nx), dtype=bool)
+    else:
+        mask = np.asarray(mask, bool)
+
+    # ---------- Topo–DOS correlation vs energy ----------
+    topo_valid = np.isfinite(topo) & mask
+    t = topo.copy()
+    if subtract_mean and np.any(topo_valid):
+        t -= np.nanmean(t[topo_valid])
+    t = np.where(topo_valid, t, np.nan)
+    t_flat = t.ravel()
+
+    rE = np.full(nE, np.nan, float)
+    for i in range(nE):
+        y = liy[i].astype(float)
+        y_valid = np.isfinite(y) & mask
+        good = (topo_valid & y_valid) if common_mask_topo else y_valid
+        if good.sum() < 3:
+            continue
+
+        yy = y.copy()
+        if subtract_mean:
+            yy -= np.nanmean(yy[good])
+
+        g = good.ravel()
+        xg = t_flat[g]
+        yg = yy.ravel()[g]
+
+        ok = np.isfinite(xg) & np.isfinite(yg)
+        xg, yg = xg[ok], yg[ok]
+        if xg.size < 3:
+            continue
+
+        xg -= xg.mean()
+        yg -= yg.mean()
+        denom = np.sqrt((xg @ xg) * (yg @ yg))
+        rE[i] = (xg @ yg) / denom if denom > 0 else np.nan
+
+    # ---------- Energy–Energy correlation matrix ----------
+    if idxs is None:
+        if energies is None:
+            idxs = np.arange(nE)
+        else:
+            energies = np.asarray(energies, float)
+            idxs = np.array([int(np.argmin(np.abs(en - e))) for e in energies], dtype=int)
+    else:
+        idxs = np.asarray(idxs, int)
+
+    idxs = np.unique(idxs)
+    ens = en[idxs]
+    cube = liy[idxs].astype(float)
+
+    finite_cube = np.isfinite(cube)
+    if common_mask_energy:
+        m = np.all(finite_cube, axis=0) & mask
+        cube = np.where(m[None, :, :], cube, np.nan)
+    else:
+        cube = np.where(mask[None, :, :], cube, np.nan)
+
+    X = cube.reshape(len(idxs), -1)
+    if subtract_mean:
+        X = X - np.nanmean(X, axis=1)[:, None]
+    X = np.where(np.isfinite(X), X, 0.0)
+
+    G = X @ X.T
+    norms = np.sqrt(np.sum(X * X, axis=1))
+    denom = np.outer(norms, norms)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        Cmat = np.where(denom > 0, G / denom, np.nan)
+    Cmat = np.clip(Cmat, -1.0, 1.0)
+
+    # ---------- Plot (share x; bottom square; inset colorbar) ----------
+    fig, (ax0, ax1) = plt.subplots(
+        2, 1,
+        figsize=figsize,
+        # sharex=True,
+        constrained_layout=True,
+        gridspec_kw={"height_ratios": [1.0, 3]}
+    )
+
+    # top
+    ax0.scatter(en, rE, s=1)
+    ax0.axhline(0, ls="--", lw=1)
+    ax0.set_ylabel("corr(Topo, dI/dV)")
+    ax0.label_outer()
+
+    # bottom
+    vmax = np.nanmax(np.abs(Cmat))
+    if not np.isfinite(vmax) or vmax == 0:
+        vmax = 1.0
+    norm = TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
+
+    im = ax1.imshow(
+        Cmat,
+        origin="lower",
+        cmap=cmap_corr,
+        norm=norm,
+        extent=[ens[0], ens[-1], ens[0], ens[-1]],
+        aspect="equal",
+    )
+    ax1.set_box_aspect(1)     # square panel
+    ax1.set_xlim(ens[0], ens[-1])  # enforce shared x-range to match matrix
+    ax1.set_xlabel("Bias (V)")
+    ax1.set_ylabel("Bias (V)")
+
+    # inset colorbar snug to the right of the matrix
+    cax = inset_axes(
+        ax1,
+        width="6%", height="100%",
+        loc="lower left",
+        bbox_to_anchor=(1.05, 0.0, 1, 1),
+        bbox_transform=ax1.transAxes,
+        borderpad=0,
+    )
+
+    cb = fig.colorbar(im, cax=cax)
+    # stmpy.image.add_colorbar(ax=ax1, loc=1, label='FFT Amplitude', fs=8)
+
+    plt.show()
+    return rE, Cmat, ens, idxs
