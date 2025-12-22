@@ -95,18 +95,62 @@ def plot_FFT_data(data,
     fig.tight_layout()
     return fig, ax
 
-def _process_pipeline(Z):
+def _process_pipeline(Z, window_type='hanning'):
     
     Z_gc = stmpy.tools.nsigma_global(Z, n=4, M=5, repeat=100)
     Z_lc = stmpy.tools.nsigma_local(Z_gc, n=5, N=4, M=5, repeat=50)
 
     Z_ls = stmpy.tools.lineSubtract(Z_lc, 2)
     Z_ps = stmpy.tools.plane_subtract(Z_lc, 2, include_cross_terms=True, preserve_units=True)
-    FZ_ls = stmpy.tools.fft(Z_lc, zeroDC=True, units='amplitude', output='absolute')
-    FZ_ps = stmpy.tools.fft(Z_ps, zeroDC=True, units='amplitude', output='absolute')
+    FZ_ls = stmpy.tools.fft(Z_lc, zeroDC=True, window=window_type, units='amplitude', output='absolute')
+    FZ_ps = stmpy.tools.fft(Z_ps, zeroDC=True, window=window_type, units='amplitude', output='absolute')
     return Z_gc, Z_lc, Z_ls, FZ_ls, Z_ps, FZ_ps
 
+def _process_pipeline_LIY(LIY, smooth_window=10, window_type='hanning'):
+    LIY_smoothed = smooth_LIY(LIY, window=smooth_window, axis=0, mode='reflect')
+    LIY_gc = stmpy.tools.nsigma_global(LIY_smoothed, n=3, M=3, repeat=2)
+    LIY_lc = stmpy.tools.nsigma_local(LIY_gc, n=3, N=4, M=3, repeat=2)
 
+    FLIY = stmpy.tools.fft(LIY, zeroDC=True, window=window_type, units='amplitude', output='absolute')
+    FLIY_gc = stmpy.tools.fft(LIY_gc, zeroDC=True, window=window_type, units='amplitude', output='absolute')
+    FLIY_lc = stmpy.tools.fft(LIY_lc, zeroDC=True, window=window_type, units='amplitude', output='absolute')
+    FLIY_smoothed = stmpy.tools.fft(LIY_smoothed, zeroDC=True, window=window_type, units='amplitude', output='absolute')
+    return LIY_smoothed, LIY_gc, LIY_lc, FLIY, FLIY_smoothed, FLIY_gc, FLIY_lc
+
+
+def normalize_LIY_by_area(en, LIY, E1, E2, eps=1e-12, window_type='hanning',return_area=True):
+    en = np.asarray(en)
+    LIY = np.asarray(LIY)
+    sort_idx = np.argsort(en)
+    en = en[sort_idx]
+    LIY = LIY[sort_idx, :, :]
+
+    # Ensure E1 < E2
+    E_low, E_high = sorted([E1, E2])
+
+    # Mask energy window
+    mask = (en >= E_low) & (en <= E_high)
+    if not np.any(mask):
+        raise ValueError("No energy points found between E1 and E2")
+
+    # Extract window
+    en_win = en[mask]
+    LIY_win = LIY[mask, :, :]
+
+    # Integrate using trapezoidal rule
+    area_map = np.trapz(LIY_win, en_win, axis=0)
+
+    # Protect against zero / bad setpoints
+    area_safe = np.where(np.abs(area_map) < eps, np.nan, area_map)
+
+    # Normalize
+    LIY_norm = LIY / area_safe[None, :, :]
+    FLIY_norm = stmpy.tools.fft(LIY_norm, zeroDC=True, window=window_type, units='amplitude', output='absolute')
+    if return_area:
+        return LIY_norm, FLIY_norm, area_map
+    else:
+        return LIY_norm, FLIY_norm
+    
 def add_corrections_and_plot(data, dos_map: bool = False, 
                              r_crop_n=0,
                              r_box_center=None,
@@ -117,29 +161,6 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                              colorbar_range_ps=None,
                              add_label=True,
                              savepath=None, savename=None, make_plots=True, show=True, return_figs=False, silent=True, RHK_format=True):
-    """
-    Parameters
-    ----------
-    data : object with at least `Z` (2D array). Optionally:
-           - `LIY` (3D array: [E, Y, X]) and `en` (1D array of energies, len E)
-    dos_map : if True, also process/plot dI/dV (LIY) maps
-    idx : energy index for the per-slice DOS plots
-
-    Side effects
-    ------------
-    Adds to `data`:
-      - Z_gc, Z_lc, Z_ls
-      - (if dos_map) LIY_gc, LIY_lc
-
-    Returns
-    -------
-    figs : dict
-        {
-          'topo': (fig_topo, ax_topo_array),
-          'dos_mean': (fig_dos_mean, ax_dos_mean_array),        # if dos_map
-          'dos_idx': (fig_dos_idx, ax_dos_idx_array)            # if dos_map
-        }
-    """
 
     scan_size = data.scan_info['scan_size']  # in nm
     n_pixels = data.scan_info['n_pixels']    
@@ -242,10 +263,9 @@ def add_corrections_and_plot(data, dos_map: bool = False,
     if dos_map:
         if not hasattr(data, 'LIY'):
             raise AttributeError("dos_map=True but `data.LIY` not found.")
-        # Corrections on the full energy stack
-        data.LIY_smoothed = smooth_LIY(data.LIY, window=10, axis=0, mode='reflect')
-        data.LIY_gc = stmpy.tools.nsigma_global(data.LIY, n=3, M=3, repeat=2)
-        data.LIY_lc = stmpy.tools.nsigma_local(data.LIY_gc, n=3, N=4, M=3, repeat=2)
+        # Corrections on the full energy stack 
+        data.LIY_smoothed, data.LIY_gc, data.LIY_lc, data.FLIY, data.FLIY_smoothed, data.FLIY_gc, data.FLIY_lc=_process_pipeline_LIY(data.LIY, smooth_window=10, window_type='hanning')
+
 
         # Mean over energy
         mean_raw = np.mean(data.LIY, axis=0)
