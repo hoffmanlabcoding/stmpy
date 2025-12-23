@@ -106,19 +106,20 @@ def _process_pipeline(Z, window_type='hanning'):
     FZ_ps = stmpy.tools.fft(Z_ps, zeroDC=True, window=window_type, units='amplitude', output='absolute')
     return Z_gc, Z_lc, Z_ls, FZ_ls, Z_ps, FZ_ps
 
-def _process_pipeline_LIY(LIY, smooth_window=10, window_type='hanning'):
-    LIY_smoothed = smooth_LIY(LIY, window=smooth_window, axis=0, mode='reflect')
-    LIY_gc = stmpy.tools.nsigma_global(LIY_smoothed, n=3, M=3, repeat=2)
-    LIY_lc = stmpy.tools.nsigma_local(LIY_gc, n=3, N=4, M=3, repeat=2)
+def _process_pipeline_LIY(data,smooth_window=10, window_type='hanning'):
+    data.LIY_smoothed = smooth_LIY(data.LIY, window=smooth_window, axis=0, mode='reflect')
+    data.LIY_gc = stmpy.tools.nsigma_global(data.LIY_smoothed, n=3, M=3, repeat=2)
+    data.LIY_lc = stmpy.tools.nsigma_local(data.LIY_gc, n=3, N=4, M=3, repeat=2)
 
-    FLIY = stmpy.tools.fft(LIY, zeroDC=True, window=window_type, units='amplitude', output='absolute')
-    FLIY_gc = stmpy.tools.fft(LIY_gc, zeroDC=True, window=window_type, units='amplitude', output='absolute')
-    FLIY_lc = stmpy.tools.fft(LIY_lc, zeroDC=True, window=window_type, units='amplitude', output='absolute')
-    FLIY_smoothed = stmpy.tools.fft(LIY_smoothed, zeroDC=True, window=window_type, units='amplitude', output='absolute')
-    return LIY_smoothed, LIY_gc, LIY_lc, FLIY, FLIY_smoothed, FLIY_gc, FLIY_lc
+    data.FLIY = stmpy.tools.fft(data.LIY, zeroDC=True, window=window_type, units='amplitude', output='absolute')
+    data.FLIY_gc = stmpy.tools.fft(data.LIY_gc, zeroDC=True, window=window_type, units='amplitude', output='absolute')
+    data.FLIY_lc = stmpy.tools.fft(data.LIY_lc, zeroDC=True, window=window_type, units='amplitude', output='absolute')
+    data.FLIY_smoothed = stmpy.tools.fft(data.LIY_smoothed, zeroDC=True, window=window_type, units='amplitude', output='absolute')
+    data.Fdidv = stmpy.tools.fft(data.didv, zeroDC=True, window=window_type, units='amplitude', output='absolute')
 
 
-def normalize_LIY_by_area(en, LIY, E1, E2, eps=1e-12, window_type='hanning',return_area=True):
+
+def normalize_LIY_by_area(en, LIY, E1, E2, eps=1e-24, window_type='hanning',return_area=True):
     en = np.asarray(en)
     LIY = np.asarray(LIY)
     sort_idx = np.argsort(en)
@@ -142,9 +143,11 @@ def normalize_LIY_by_area(en, LIY, E1, E2, eps=1e-12, window_type='hanning',retu
 
     # Protect against zero / bad setpoints
     area_safe = np.where(np.abs(area_map) < eps, np.nan, area_map)
+    # Find the average area over valid pixels
+    avg_area = np.nanmean(area_safe)
 
     # Normalize
-    LIY_norm = LIY / area_safe[None, :, :]
+    LIY_norm = LIY / area_safe[None, :, :] * avg_area
     FLIY_norm = stmpy.tools.fft(LIY_norm, zeroDC=True, window=window_type, units='amplitude', output='absolute')
     if return_area:
         return LIY_norm, FLIY_norm, area_map
@@ -264,17 +267,17 @@ def add_corrections_and_plot(data, dos_map: bool = False,
         if not hasattr(data, 'LIY'):
             raise AttributeError("dos_map=True but `data.LIY` not found.")
         # Corrections on the full energy stack 
-        data.LIY_smoothed, data.LIY_gc, data.LIY_lc, data.FLIY, data.FLIY_smoothed, data.FLIY_gc, data.FLIY_lc=_process_pipeline_LIY(data.LIY, smooth_window=10, window_type='hanning')
-
+        _process_pipeline_LIY(data, smooth_window=10, window_type='hanning')
+    
 
         # Mean over energy
-        mean_raw = np.mean(data.LIY, axis=0)
+       
         mean_gc  = np.mean(data.LIY_gc, axis=0)
         mean_lc  = np.mean(data.LIY_lc, axis=0)
 
         if make_plots:
             fig_dm, ax_dm = plt.subplots(1, 3, figsize=(15, 5))
-            ax_dm[0].imshow(mean_raw, origin='lower',                        
+            ax_dm[0].imshow(data.didv, origin='lower',                        
                             cmap=stmpy.cm.Blues_r)
             ax_dm[0].set_title('Raw dI/dV at mean V')
             ax_dm[1].imshow(mean_gc, origin='lower', 
@@ -1143,6 +1146,8 @@ def cross_correlation_2d_plot(
                 anti_aliasing=anti_aliasing,
             )
             high_res_label = "B"
+    else:
+        high_res_label = "None"  # same shape
 
     ny, nx = A.shape  # now guaranteed equal
 
@@ -1208,7 +1213,7 @@ def cross_correlation_2d_plot(
         axs[2].plot(dx, dy, "ko", ms=3)
         axs[2].axhline(0, ls="--", c="gray")
         axs[2].axvline(0, ls="--", c="gray")
-        axs[2].set_title(f"Cross-corr (peak={peak_value:.3f})")
+        axs[2].set_title(f"peak={peak_value:.3f}, center={central_value:.3f}\n")
         axs[2].set_xlabel("dx (pixels)")
         axs[2].set_ylabel("dy (pixels)")
         plt.colorbar(im2, ax=axs[2], fraction=0.046, pad=0.04)
@@ -1329,7 +1334,7 @@ def plot_topo_and_energy_energy_correlations_sharedx_square(
 
     # top
     ax0.scatter(en, rE, s=1)
-    ax0.axhline(0, ls="--", lw=1)
+    ax0.axhline(0, ls="--", lw=1, color="gray")
     ax0.set_ylabel("corr(Topo, dI/dV)")
     ax0.label_outer()
 
@@ -1338,6 +1343,8 @@ def plot_topo_and_energy_energy_correlations_sharedx_square(
     if not np.isfinite(vmax) or vmax == 0:
         vmax = 1.0
     norm = TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
+    # set the diagonal to zero for visualization
+    # np.fill_diagonal(Cmat, 0.0)
 
     im = ax1.imshow(
         Cmat,
@@ -1367,3 +1374,160 @@ def plot_topo_and_energy_energy_correlations_sharedx_square(
 
     plt.show()
     return rE, Cmat, ens, idxs
+
+def group_LIY_by_intensity_at_each_energy(en, LIY, n_groups=10, use_nanmean=True):
+    """
+    Group pixels by LIY (dI/dV) intensity at each reference energy, then average full spectra per group.
+
+    For each reference energy E_ref (i.e., each energy index k):
+      - Take LIY[k, :, :] across pixels
+      - Bin pixels into n_groups by percentiles: top 0-10%, 10-20%, ..., 90-100%
+      - For each bin, average the full LIY spectrum over those pixels
+
+    Returns:
+      en_sorted: (nE,)
+      LIY_grouped: (nE_ref, nE, n_groups)
+        where LIY_grouped[k, :, g] is the mean spectrum of pixels in group g defined at E_ref=en_sorted[k].
+
+    Notes:
+      - Groups are defined by percentile bins on LIY at the reference energy.
+      - If a group is empty (can happen with many identical values), it will be filled with NaNs.
+    """
+    en = np.asarray(en)
+    LIY = np.asarray(LIY)
+
+    if LIY.ndim != 3:
+        raise ValueError("LIY must have shape (n_energy, Ny, Nx)")
+
+    nE, Ny, Nx = LIY.shape
+    if en.shape[0] != nE:
+        raise ValueError("en length must match LIY.shape[0]")
+
+    # ---- sort energies (en might not be ascending) ----
+    order = np.argsort(en)
+    en_sorted = en[order]
+    LIY_sorted = LIY[order, :, :]
+
+    # ---- flatten pixels dimension ----
+    Npix = Ny * Nx
+    LIY_flat = LIY_sorted.reshape(nE, Npix)  # (nE, Npix)
+
+    mean_fn = np.nanmean if use_nanmean else np.mean
+    LIY_grouped = np.full((nE, nE, n_groups), np.nan, dtype=float)
+
+    # percentile edges: 0,10,20,...,100
+    edges_pct = np.linspace(0, 100, n_groups + 1)
+
+    for k_ref in range(nE):
+        vals = LIY_flat[k_ref, :]  # LIY at reference energy across pixels
+
+        # If vals contains NaNs, we'll ignore them for bin edges and masks
+        good = np.isfinite(vals)
+        if not np.any(good):
+            continue  # leave NaNs
+
+        vals_good = vals[good]
+
+        # Compute percentile edges on the good values
+        edges = np.percentile(vals_good, edges_pct)
+
+        # Make bins half-open except last: [e0,e1),...,[e_{n-1},e_n]
+        # Also: handle many identical values by letting empty bins become NaN.
+        for g in range(n_groups):
+            lo, hi = edges[g], edges[g + 1]
+
+            if g < n_groups - 1:
+                in_bin_good = (vals_good >= lo) & (vals_good < hi)
+            else:
+                in_bin_good = (vals_good >= lo) & (vals_good <= hi)
+
+            # Map back to full pixel mask
+            mask = np.zeros(Npix, dtype=bool)
+            idx_good = np.where(good)[0]
+            mask[idx_good[in_bin_good]] = True
+
+            if not np.any(mask):
+                continue
+
+            # Average the FULL spectrum over pixels in this bin
+            LIY_grouped[k_ref, :, g] = mean_fn(LIY_flat[:, mask], axis=1)
+
+    return en_sorted, LIY_grouped
+
+def plot_LIY_groups_at_energy(
+    en,
+    LIY_grouped,
+    E_ref,
+    *,
+    energy_is_index=False,
+    cmap="viridis",
+    linewidth=2.0,
+    alpha=0.9,
+    ax=None,
+):
+    """
+    Plot grouped LIY spectra for a chosen reference energy.
+
+    Args
+    ----
+    en : (nE,) array
+        Energy axis (sorted, same as returned by group_LIY_by_intensity_at_each_energy)
+    LIY_grouped : (nE_ref, nE, n_groups) array
+        Output of group_LIY_by_intensity_at_each_energy
+    E_ref : float or int
+        Reference energy value (float) or index (int)
+    energy_is_index : bool
+        If True, interpret E_ref as an index
+    cmap : str or matplotlib colormap
+        Colormap for group gradient (low → high percentile)
+    linewidth : float
+        Line width
+    alpha : float
+        Line transparency
+    ax : matplotlib axis or None
+        If None, create a new figure
+
+    Returns
+    -------
+    ax : matplotlib axis
+    """
+    en = np.asarray(en)
+    LIY_grouped = np.asarray(LIY_grouped)
+
+    nE_ref, nE, n_groups = LIY_grouped.shape
+
+    if not energy_is_index:
+        # find nearest energy index
+        k_ref = int(np.argmin(np.abs(en - E_ref)))
+    else:
+        k_ref = int(E_ref)
+
+    if k_ref < 0 or k_ref >= nE_ref:
+        raise IndexError("Reference energy index out of range")
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 4))
+
+    cmap_obj = plt.get_cmap(cmap)
+    colors = cmap_obj(np.linspace(0.15, 0.95, n_groups))
+
+    for g in range(n_groups):
+        spec = LIY_grouped[k_ref, :, g]
+        if np.all(np.isnan(spec)):
+            continue
+
+        ax.plot(
+            en,
+            spec,
+            color=colors[g],
+            lw=linewidth,
+            alpha=alpha,
+            label=f"Bin {g+1}",
+        )
+
+    ax.set_xlabel("Bias (V)")
+    ax.set_ylabel("dI/dV (a.u.)")
+    ax.set_title(f"Reference bias = {en[k_ref]:.3g} V", fontsize=12)
+    ax.legend(fontsize=12, frameon=False)
+
+    return ax

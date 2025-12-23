@@ -970,7 +970,6 @@ def load_sm4(filePath):
 
     def match_channel(channel, idx):
     
-
         # print(list(label.values())[idx])
         if idx >= len(label):
             return 0
@@ -996,9 +995,6 @@ def load_sm4(filePath):
     if liy == 100:
         liy = getf('LINELIA Current')
     
-    # print(liy)
-    # print(liy)
-    # print('-----')
     
     i = getf('LINECurrent')
     z = getf('IMAGETopography')
@@ -1011,16 +1007,19 @@ def load_sm4(filePath):
     else:
         self.en = f[0].coords[1][1]
     
+    self.order = np.argsort(self.en)
+    self.en = self.en[self.order]
+    
     # print(dir(self))    
 
     if _make_attr(self, 'LIY', [liy], 'data'):
-        self.LIY = ensure_square(self.LIY)[:, ::-1, ::-1]
+        self.LIY = ensure_square(self.LIY)[:, ::-1, ::-1][self.order]
         self.didvStd = np.std(self.LIY, axis=0)
         self.didv = np.mean(self.LIY, axis=0)
 
         if match_channel('LINELIA current', liy+1) or match_channel('LINELIA Current', liy+1):
             if _make_attr(self, 'LIY_BWD', [liy+1], 'data'):
-                self.LIY_BWD = ensure_square(self.LIY_BWD)[:, ::-1, ::-1]
+                self.LIY_BWD = ensure_square(self.LIY_BWD)[:, ::-1, ::-1][self.order]
                 self.didv_BWD = np.mean(self.LIY_BWD, axis=0)
                 self.didvStd_BWD = np.std(self.LIY_BWD, axis=0)
                 print('LIY FWD and BWD found')
@@ -1034,12 +1033,12 @@ def load_sm4(filePath):
 
     if _make_attr(self, 'I', [i], 'data'):
         
-        self.I = ensure_square(self.I)[:, ::-1, ::-1]
+        self.I = ensure_square(self.I)[:, ::-1, ::-1][self.order]
         self.iv = np.mean(self.I,  axis=0)
         
         if match_channel('LINECurrent', i+1):
             if _make_attr(self, 'I_BWD', [i+1], 'data'):
-                self.I_BWD = ensure_square(self.I_BWD)[:, ::-1, ::-1]
+                self.I_BWD = ensure_square(self.I_BWD)[:, ::-1, ::-1][self.order]
                 self.iv_BWD = np.mean(self.I_BWD, axis=0)
                 print('I FWD and BWD found')
         else:

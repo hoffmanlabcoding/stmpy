@@ -200,11 +200,11 @@ def __findBraggs(A, rspace=True, min_dist=5, thres=0.25, r=None,
                 'mask3': mask3,
                 'even_out': even_out,
             }
-        bp = findBraggs(A, show=show, **obj.bp_parameters)
+        bp, center = findBraggs(A, show=show, **obj.bp_parameters)
         pixels = np.shape(A)[::-1]
         __update_parameters(obj, a0=obj.parameters['a0'], bp=bp, pixels=pixels,
                             size=obj.parameters['size'], use_a0=obj.parameters['use_a0'])
-        return bp
+        return bp, center
 
 def global_corr(A, bp=None, show=False, angle=np.pi/4, obj=None, update_obj=False, **kwargs):
     """
@@ -234,13 +234,13 @@ def global_corr(A, bp=None, show=False, angle=np.pi/4, obj=None, update_obj=Fals
         return __global_corr(A, bp=bp, show=show, angle=angle, **kwargs)
     else:
         if bp is None:
-            bp = __findBraggs(A, obj=obj)
+            bp, center = __findBraggs(A, obj=obj)
         matrix, A_gcorr = __global_corr(
             A, bp=bp, show=show, angle=angle, **kwargs)
         if update_obj is not False:
             # obj.matrix.append(matrix)
             # obj.matrix = matrix
-            bp_new = __findBraggs(A_gcorr, obj=obj)
+            bp_new, center = __findBraggs(A_gcorr, obj=obj)
             pixels = np.shape(A_gcorr)[::-1]
             __update_parameters(obj, a0=obj.parameters['a0'], bp=bp_new, pixels=pixels,
                                 size=obj.parameters['size'], use_a0=obj.parameters['use_a0'])
@@ -251,7 +251,7 @@ def __global_corr(A, bp=None, show=False, angle=np.pi/4, **kwargs):
 
     *_, s2, s1 = np.shape(A)
     if bp is None:
-        bp_1 = findBraggs(A, thres=0.2, show=show)
+        bp_1, center = findBraggs(A, thres=0.2, show=show)
     else:
         bp_1 = bp
     m, data_1 = gshearcorr(A, bp_1, rspace=True, angle=angle, **kwargs)
@@ -321,7 +321,7 @@ def local_corr(A, bp=None, sigma=10, method="lockin", fixMethod='unwrap',
         return __local_corr(A, bp=bp, sigma=sigma, method=method, fixMethod=fixMethod, show=show)
     else:
         if bp is None:
-            bp = findBraggs(A, obj=obj)
+            bp, center = findBraggs(A, obj=obj)
         ux, uy, A_corr = __local_corr(A, bp=bp, sigma=sigma, method=method,
                                       fixMethod=fixMethod, show=show)
         if update_obj is not False:
@@ -334,7 +334,7 @@ def __local_corr(A, bp=None, sigma=10, method="lockin", fixMethod='unwrap', show
 
     *_, s2, s1 = np.shape(A)
     if bp is None:
-        bp_2 = findBraggs(A, thres=0.2, show=show)
+        bp_2, center = findBraggs(A, thres=0.2, show=show)
     else:
         bp_2 = bp
     theta1, theta2, Q1, Q2 = phasemap(A, bp=bp_2, method=method, sigma=sigma)
@@ -582,7 +582,7 @@ def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp
 
     if bp_c is None:
         # find the Bragg peak before the drift correction 
-        bp1 = findBraggs(A, r=r, w=w, mask3=mask3, show=show, **kwargs)
+        bp1, center = findBraggs(A, r=r, w=w, mask3=mask3, show=show, **kwargs)
         bp1 = sortBraggs(bp1, s=np.shape(A))
         # Find the angle between each Bragg peaks
         if bp_angle is None:
@@ -646,7 +646,7 @@ def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp
     if cut2 is None:
         z_c = z_temp
     else:
-        bp3 = findBraggs(z_temp, r=r, w=w, mask3=mask3, **kwargs)
+        bp3, center = findBraggs(z_temp, r=r, w=w, mask3=mask3, **kwargs)
         z_c = cropedge_new(z_temp, n=cut2, bp=bp3, force_commen=True)
         A1 = cropedge_new(A1, n=cut2)
         A2 = cropedge_new(A2, n=cut2)
@@ -938,10 +938,10 @@ def find_drift(self, A, r=None, w=None, mask3=None, cut1=None, cut2=None, \
     if cut1 is not None:
         A = cropedge(A, n=cut1)
     if not hasattr(self, 'bp_parameters'):
-        self.bp1 = __findBraggs(A, r=r, w=w, mask3=mask3, update_obj=True, obj=self,  \
+        self.bp1, center = __findBraggs(A, r=r, w=w, mask3=mask3, update_obj=True, obj=self,  \
                                 show=show, even_out=even_out, **kwargs)
     else:
-        self.bp1 = __findBraggs(A, r=r, w=w, mask3=mask3, update_obj=True, obj=self,  \
+        self.bp1, center = __findBraggs(A, r=r, w=w, mask3=mask3, update_obj=True, obj=self,  \
                                 show=show, even_out=even_out, **kwargs)
         # self.bp1 = findBraggs(A, obj=self, show=show)
 
@@ -976,7 +976,7 @@ def find_drift(self, A, r=None, w=None, mask3=None, cut1=None, cut2=None, \
     ztemp = driftcorr(A, self.ux, self.uy, method=method, interpolation='cubic')
     
     # This part interpolates the drift corrected maps
-    self.bp3 = __findBraggs(ztemp, obj=self)
+    self.bp3, center = __findBraggs(ztemp, obj=self)
     if cut2 is None:
         cut2 = 0
         force_commen = False
@@ -1009,7 +1009,7 @@ def find_drift(self, A, r=None, w=None, mask3=None, cut1=None, cut2=None, \
         ax[1,0].imshow(self.zc, cmap=stmpy.cm.blue2, origin='lower', clim=[c2-5*s2, c2+5*s2])
         ax[1,1].imshow(B_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c1+5*s1])
         
-    self.bp = __findBraggs(self.zc, obj=self)
+    self.bp, center = __findBraggs(self.zc, obj=self)
 
 
 def correct(self, use):
@@ -1209,7 +1209,7 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=0, r=None,
         print('The coordinates of the Q vectors are:')
         pprint(coords-center)
 
-    return coords
+    return coords, center
 
 # help function: fitting 2D gaussian peaks around Bragg peaks
 def fitGaussian2d(data, p0):
@@ -1310,7 +1310,7 @@ def cropedge_new(A, n, bp=None, c1=2, c2=2,
             B = np.copy(A)
         *_, L2, L1 = np.shape(A)
         if bp is None:
-            bp = findBraggs(A, show=False)
+            bp, center = findBraggs(A, show=False)
         bp = sortBraggs(bp, s=np.shape(A))
         bp_new = bp - (np.array([L1, L2])-1) // 2
         N1 = compute_dist(bp_new[0], bp_new[1])
@@ -1398,7 +1398,7 @@ def __cropedge(A, n, bp=None, c1=2, c2=2, a1=None, a2=None, force_commen=False):
             B = np.copy(A)
         *_, L2, L1 = np.shape(A)
         if bp is None:
-            bp = findBraggs(A, show=False)
+            bp, center = findBraggs(A, show=False)
         # bp = sortBraggs(bp, s=np.array([L2, L1]))
         bp = sortBraggs(bp, s=np.shape(A))
         bp_new = bp - (np.array([L1, L2])-1) // 2
@@ -2202,7 +2202,7 @@ def quick_linecut(A, width=2, n=4, bp=None, ax=None, thres=3):
     plt.figure(figsize=[4, 4])
     if len(np.shape(A)) == 3:
         if bp is None:
-            bp_x = np.min(findBraggs(np.mean(A, axis=0), rspace=False))
+            bp_x = np.min(findBraggs(np.mean(A, axis=0), rspace=False)[0])
         else:
             bp_x = bp
         cm = np.mean(np.mean(A, axis=0))
@@ -2210,7 +2210,7 @@ def quick_linecut(A, width=2, n=4, bp=None, ax=None, thres=3):
         plt.imshow(np.mean(A, axis=0), clim=[0, cm+thres*cs])
     elif len(np.shape(A)) == 2:
         if bp is None:
-            bp_x = np.min(findBraggs(A, rspace=False))
+            bp_x = np.min(findBraggs(A, rspace=False)[0])
         else:
             bp_x = bp
         cm = np.mean(A)
@@ -2234,7 +2234,7 @@ def quick_show(A, en, thres=5, rspace=True, saveon=False, qlimit=1.2, imgName=''
     if rspace is False:
         imgsize = np.shape(A)[-1]
         bp_x = np.min(findBraggs(np.mean(A, axis=0),
-                                 min_dist=int(imgsize/10), rspace=rspace))
+                                 min_dist=int(imgsize/10), rspace=rspace)[0])
         ext = imgsize / (imgsize - 2*bp_x)
     if layers > 12:
         skip = layers // 12
@@ -2300,7 +2300,7 @@ def quick_show_single(A, en, thres=5, fs=4, qscale=None, rspace=False, saveon=Fa
             else:
                 A_topo = A
             bp_x = np.min(findBraggs(
-                A_topo, min_dist=int(imgsize/10), rspace=rspace))
+                A_topo, min_dist=int(imgsize/10), rspace=rspace)[0])
             ext = imgsize / (imgsize - 2*bp_x)
         else:
             ext = qscale

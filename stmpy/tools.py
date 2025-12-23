@@ -1772,7 +1772,7 @@ def fftfreq(px, nm):
     freqs = np.fft.fftfreq(px, float(nm)/(px))
     return np.fft.fftshift(freqs)
 
-def normalize(data, axis=None, condition='mean', eps=1e-12, magnitude=False):
+def normalize(data, axis=None, condition='mean', eps=1e-24, magnitude=False):
     '''
     Normalize a 1D/2D/3D numpy array line by line, per image, or globally.
 
@@ -1784,7 +1784,7 @@ def normalize(data, axis=None, condition='mean', eps=1e-12, magnitude=False):
                                If None, normalize whole array.
                                Examples:
                                  axis=0       -> treat each column/momentum individually
-                                 axis=1       -> treat each row/frequency individually
+                                 axis=1       -> treat each row/frequency/energy individually
                                  axis=(-2,-1) -> treat each 2D image (for stacks shaped N,H,W) individually
                                  axis=None    -> global normalization
         condition - Optional : Normalization function.
@@ -3034,3 +3034,253 @@ def fourier_filter(data, freq, sigma, method='disk', envelope=False):
 
 
 
+import numpy as np
+import stmpy
+
+def split_fourier_circles(data, points, radius, mirror=True,
+                          method='disk', envelope=False,
+                          window='None', zeroDC=True, beta=1.0,
+                          return_fft=False, return_mask=False,
+                          show=False, show_clim_sigma=3, show_cmap=None,
+                          show_fft_output='absolute'):
+    '''
+    Split Fourier space into (inside circles) and (outside circles) around
+    specified points, then inverse transform each component.
+
+    + NEW:
+      show=True will display:
+        (1) original real-space (if 3D: mean over first axis)
+        (2) FFT magnitude with circles drawn (and mask overlay)
+        (3) inverse-FFT "inside circles" component
+        (4) inverse-FFT "outside circles" component
+
+    Inputs:
+        data    - Required : 2D or 3D numpy array (real-space image or stack).
+        points  - Required : List/array of points [[x0,y0],[x1,y1],...]
+                             OR a single point [x0,y0].
+                             Convention matches stmpy: x in [1..W], y in [1..H].
+        radius  - Required : Float radius in pixels (in FFT image coordinates).
+        mirror  - Optional : If True, also include conjugate-symmetric partner
+                             points about the FFT center (recommended).
+        method  - Optional : 'disk' (binary) or 'gaussian' (soft mask).
+        envelope- Optional : Passed to stmpy.tools.ifft (Hilbert envelope).
+        window  - Optional : Window passed to stmpy.tools.fft (default 'None').
+        zeroDC  - Optional : Bool passed to stmpy.tools.fft (default True).
+        beta    - Optional : Kaiser beta if window='kaiser'.
+        return_fft - Optional : If True, also return (F_in, F_out) complex FFTs.
+        return_mask- Optional : If True, also return the mask used in k-space.
+        show    - Optional : If True, plot diagnostic figures.
+        show_clim_sigma - Optional : sigma-clipping for displayed images (default 3).
+        show_cmap - Optional : Matplotlib cmap for display (default stmpy.cm.gray_r if available).
+        show_fft_output - Optional : 'absolute'|'real'|'imag'|'phase'|'complex' used
+                                   for *display* of FFT panel (filtering always uses complex).
+
+    Returns:
+        in_real   - Real-space component reconstructed from inside-circles FFT.
+        out_real  - Real-space component reconstructed from outside-circles FFT.
+        (optional) F_in, F_out - Complex FFT components (fftshifted).
+        (optional) mask - The k-space mask (same shape as each FFT layer).
+    '''
+    data = np.asarray(data)
+    if len(data.shape) not in (2, 3):
+        raise ValueError('Data must be 2D or 3D numpy array.')
+
+    # normalize points input
+    pts = np.array(points, dtype=float)
+    if pts.ndim == 1:
+        pts = pts[None, :]
+    if pts.shape[1] != 2:
+        raise ValueError('points must be [x,y] or [[x,y], ...]')
+
+    H = data.shape[-2]
+    W = data.shape[-1]
+
+    # fftshift center in 1..W / 1..H convention
+    cx = (W + 1) / 2.0
+    cy = (H + 1) / 2.0
+
+    # build mask grid (x: 1..W, y: 1..H)
+    x = np.linspace(1, W, W)[None, :]
+    y = np.linspace(1, H, H)[:, None]
+
+    # include mirror (conjugate) points about FFT center
+    if mirror:
+        pts_m = np.zeros_like(pts)
+        pts_m[:, 0] = 2.0 * cx - pts[:, 0]
+        pts_m[:, 1] = 2.0 * cy - pts[:, 1]
+        pts_all = np.vstack([pts, pts_m])
+    else:
+        pts_all = pts
+
+    # accumulate mask
+    if method == 'disk':
+        mask = np.zeros((H, W), dtype=float)
+        for (px, py) in pts_all:
+            r2 = (x - px) ** 2 + (y - py) ** 2
+            mask = np.maximum(mask, (r2 <= radius ** 2).astype(float))
+    elif method == 'gaussian':
+        mask = np.zeros((H, W), dtype=float)
+        sig2 = float(radius) ** 2
+        for (px, py) in pts_all:
+            r2 = (x - px) ** 2 + (y - py) ** 2
+            mask = np.maximum(mask, np.exp(-r2 / (2.0 * sig2 + 1e-30)))
+    else:
+        raise ValueError('method must be "disk" or "gaussian"')
+
+    # helper: split one complex FFT layer and ifft back
+    def _split_layer(layer):
+        F = stmpy.tools.fft(layer, window=window, output='complex',
+                            zeroDC=zeroDC, beta=beta, units='None')
+        F_in = F * mask
+        F_out = F * (1.0 - mask)
+
+        if envelope:
+            in_real = stmpy.tools.ifft(F_in, output='absolute', envelope=True)
+            out_real = stmpy.tools.ifft(F_out, output='absolute', envelope=True)
+        else:
+            in_real = stmpy.tools.ifft(F_in, output='real', envelope=False)
+            out_real = stmpy.tools.ifft(F_out, output='real', envelope=False)
+
+        return in_real, out_real, F_in, F_out
+
+    # ---------------------------
+    # Compute split (2D / 3D)
+    # ---------------------------
+    if len(data.shape) == 2:
+        in_real, out_real, F_in, F_out = _split_layer(data)
+        F_for_show = stmpy.tools.fft(data, window=window, output='complex',
+                                     zeroDC=zeroDC, beta=beta, units='None')
+    else:
+        N = data.shape[0]
+        in_real = np.zeros_like(data, dtype=float)
+        out_real = np.zeros_like(data, dtype=float)
+
+        if return_fft:
+            F_in_all = np.zeros_like(data, dtype=np.complex128)
+            F_out_all = np.zeros_like(data, dtype=np.complex128)
+
+        for ix, layer in enumerate(data):
+            rin, rout, Fin, Fout = _split_layer(layer)
+            in_real[ix] = rin
+            out_real[ix] = rout
+            if return_fft:
+                F_in_all[ix] = Fin
+                F_out_all[ix] = Fout
+
+        # For "show", use mean layer (as requested)
+        mean_layer = np.mean(data, axis=0)
+        __rin, __rout, __Fin, __Fout = _split_layer(mean_layer)
+        F_in, F_out = __Fin, __Fout
+        F_for_show = stmpy.tools.fft(mean_layer, window=window, output='complex',
+                                     zeroDC=zeroDC, beta=beta, units='None')
+
+    # ---------------------------
+    # Show diagnostics
+    # ---------------------------
+    if show:
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+
+        # choose display cmap
+        if show_cmap is None:
+            try:
+                show_cmap = stmpy.cm.gray_r
+            except Exception:
+                show_cmap = "gray"
+
+        def _sigma_clim(img, ns=3):
+            v = img[np.isfinite(img)]
+            if v.size == 0:
+                return None
+            mu = np.mean(v)
+            sd = np.std(v)
+            return [mu - ns * sd, mu + ns * sd]
+
+        # data to show in real space
+        if len(data.shape) == 2:
+            real_show = data
+            in_show = in_real
+            out_show = out_real
+        else:
+            real_show = np.mean(data, axis=0)
+            in_show = stmpy.tools.ifft(F_in, output='real', envelope=False) if not envelope else stmpy.tools.ifft(F_in, output='absolute', envelope=True)
+            out_show = stmpy.tools.ifft(F_out, output='real', envelope=False) if not envelope else stmpy.tools.ifft(F_out, output='absolute', envelope=True)
+
+        # FFT to show (select output type)
+        if show_fft_output == 'absolute':
+            fft_show = np.abs(F_for_show)
+        elif show_fft_output == 'real':
+            fft_show = np.real(F_for_show)
+        elif show_fft_output == 'imag':
+            fft_show = np.imag(F_for_show)
+        elif show_fft_output == 'phase':
+            fft_show = np.angle(F_for_show)
+        elif show_fft_output == 'complex':
+            fft_show = np.abs(F_for_show)
+        else:
+            raise ValueError("show_fft_output must be 'absolute','real','imag','phase','complex'")
+
+        fig, ax = plt.subplots(2, 2, figsize=(8, 8))
+
+        # (1) original
+        clim = _sigma_clim(real_show, show_clim_sigma)
+        im0 = ax[0, 0].imshow(real_show, cmap=show_cmap, origin='lower',
+                              clim=clim if clim is not None else None)
+        ax[0, 0].set_title('Original (mean if 3D)')
+        ax[0, 0].set_xticks([]); ax[0, 0].set_yticks([])
+        plt.colorbar(im0, ax=ax[0, 0], fraction=0.046, pad=0.04)
+
+        # (2) FFT with circles + mask overlay
+        clim = _sigma_clim(fft_show, show_clim_sigma)
+        im1 = ax[0, 1].imshow(fft_show, cmap=show_cmap, origin='lower',
+                              clim=clim if clim is not None else None)
+        ax[0, 1].set_title('FFT (mask & circles)')
+        ax[0, 1].set_xticks([]); ax[0, 1].set_yticks([])
+        # overlay mask lightly
+        ax[0, 1].imshow(mask, cmap='Reds', origin='lower', alpha=0.25)
+
+        # draw circles (convert 1..W/1..H -> imshow coords 0..W-1/0..H-1)
+        for (px, py) in pts_all:
+            circ = patches.Circle((px - 1.0, py - 1.0), radius,
+                                  fill=False, ec='cyan', lw=1.2)
+            ax[0, 1].add_patch(circ)
+
+        plt.colorbar(im1, ax=ax[0, 1], fraction=0.046, pad=0.04)
+
+        # (3) iFFT inside
+        clim = _sigma_clim(in_show, show_clim_sigma)
+        im2 = ax[1, 0].imshow(in_show, cmap=show_cmap, origin='lower',
+                              clim=clim if clim is not None else None)
+        ax[1, 0].set_title('iFFT: inside circles')
+        ax[1, 0].set_xticks([]); ax[1, 0].set_yticks([])
+        plt.colorbar(im2, ax=ax[1, 0], fraction=0.046, pad=0.04)
+
+        # (4) iFFT outside
+        clim = _sigma_clim(out_show, show_clim_sigma)
+        im3 = ax[1, 1].imshow(out_show, cmap=show_cmap, origin='lower',
+                              clim=clim if clim is not None else None)
+        ax[1, 1].set_title('iFFT: outside circles')
+        ax[1, 1].set_xticks([]); ax[1, 1].set_yticks([])
+        plt.colorbar(im3, ax=ax[1, 1], fraction=0.046, pad=0.04)
+
+        plt.tight_layout()
+        plt.show()
+
+    # ---------------------------
+    # Return outputs
+    # ---------------------------
+    if len(data.shape) == 2:
+        outs = [in_real, out_real]
+        if return_fft:
+            outs += [F_in, F_out]
+        if return_mask:
+            outs += [mask]
+        return tuple(outs)
+
+    else:
+        outs = [in_real, out_real]
+        if return_fft:
+            outs += [F_in_all, F_out_all]
+        if return_mask:
+            outs += [mask]
+        return tuple(outs)
