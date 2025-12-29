@@ -85,7 +85,7 @@ def plot_FFT_data(data,
             clim = _auto_clim(arr, sigma=sigma, center=center, prc=prc)
 
 
-    ax.imshow(arr, origin='lower', cmap=cmap, clim=clim)
+    ax.imshow(arr, origin='lower', cmap=cmap, clim=clim, interpolation='none')
     if add_colorbar:
         stmpy.image.add_colorbar(ax=ax, loc=0, label='FFT Amplitude', fs=8)
     # ax.set_axis_off()
@@ -185,17 +185,17 @@ def add_corrections_and_plot(data, dos_map: bool = False,
         data.FZ_BWD_ls = stmpy.tools.fft(data.Z_BWD_ls, zeroDC=True, window='hanning', units='amplitude', output='absolute')
         if make_plots:
             fig_topo, ax_topo = plt.subplots(2, 7, figsize=(23, 10))
-            ax_topo[0,0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,0].set_title('Raw Z')
-            ax_topo[0,1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,1].set_title('Global Corrected Z')
-            ax_topo[0,2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,2].set_title('Local Corrected Z')
-            ax_topo[0,3].imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,3].set_title('Line Subtracted Z')
-            ax_topo[0,4].imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0,4].set_title('Plane Subtracted Z')
+            ax_topo[0,0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,0].set_title('Raw Z')
+            ax_topo[0,1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,1].set_title('Global Corrected Z')
+            ax_topo[0,2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,2].set_title('Local Corrected Z')
+            ax_topo[0,3].imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,3].set_title('Line Subtracted Z')
+            ax_topo[0,4].imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,4].set_title('Plane Subtracted Z')
         
-            ax_topo[1,0].imshow(data.Z_BWD,     cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[1,0].set_title('Raw Z BWD')
-            ax_topo[1,1].imshow(data.Z_BWD_gc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[1,1].set_title('Global Corrected Z BWD')
-            ax_topo[1,2].imshow(data.Z_BWD_lc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[1,2].set_title('Local Corrected Z BWD')
-            ax_topo[1,3].imshow(data.Z_BWD_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range); ax_topo[1,3].set_title('Line Subtracted Z BWD')
-            ax_topo[1,4].imshow(data.Z_BWD_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps); ax_topo[1,4].set_title('Plane Subtracted Z BWD')
+            ax_topo[1,0].imshow(data.Z_BWD,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,0].set_title('Raw Z BWD')
+            ax_topo[1,1].imshow(data.Z_BWD_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,1].set_title('Global Corrected Z BWD')
+            ax_topo[1,2].imshow(data.Z_BWD_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,2].set_title('Local Corrected Z BWD')
+            ax_topo[1,3].imshow(data.Z_BWD_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range, interpolation='none'); ax_topo[1,3].set_title('Line Subtracted Z BWD')
+            ax_topo[1,4].imshow(data.Z_BWD_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps, interpolation='none'); ax_topo[1,4].set_title('Plane Subtracted Z BWD')
 
             for i in range(2):
                 for j in range(7):
@@ -229,12 +229,11 @@ def add_corrections_and_plot(data, dos_map: bool = False,
         if make_plots:
             fig_topo, ax_topo = plt.subplots(1, 7, figsize=(23, 5))
 
-            ax_topo[0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[0].set_title('Raw Z')
-            ax_topo[1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[1].set_title('Global Corrected Z')
-            ax_topo[2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower'); ax_topo[2].set_title('Local Corrected Z')
-            ax_topo[3].imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range); ax_topo[3].set_title('Line Subtracted Z')
-            ax_topo[4].imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps); ax_topo[4].set_title('Plane Subtracted Z')
-
+            ax_topo[0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0].set_title('Raw Z')
+            ax_topo[1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1].set_title('Global Corrected Z')
+            ax_topo[2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[2].set_title('Local Corrected Z')
+            ax_topo[3].imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range, interpolation='none'); ax_topo[3].set_title('Line Subtracted Z')
+            ax_topo[4].imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps, interpolation='none'); ax_topo[4].set_title('Plane Subtracted Z')
             for i, a in enumerate(ax_topo): 
                 a.set_xlabel('')
                 a.set_ylabel('')
@@ -277,15 +276,11 @@ def add_corrections_and_plot(data, dos_map: bool = False,
 
         if make_plots:
             fig_dm, ax_dm = plt.subplots(1, 3, figsize=(15, 5))
-            ax_dm[0].imshow(data.didv, origin='lower',                        
-                            cmap=stmpy.cm.Blues_r)
+            ax_dm[0].imshow(data.didv, origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
             ax_dm[0].set_title('Raw dI/dV at mean V')
-            ax_dm[1].imshow(mean_gc, origin='lower', 
-                            
-                            cmap=stmpy.cm.Blues_r)
+            ax_dm[1].imshow(mean_gc, origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
             ax_dm[1].set_title('Global Corrected dI/dV at mean V')
-            ax_dm[2].imshow(mean_lc, origin='lower', 
-                            cmap=stmpy.cm.Blues_r)
+            ax_dm[2].imshow(mean_lc, origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
             ax_dm[2].set_title('Local Corrected dI/dV at mean V')
             for a in ax_dm: 
                 a.set_axis_off()
@@ -304,11 +299,11 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                     en_label = f"index {idx}"
 
                 fig_ds, ax_ds = plt.subplots(1, 3, figsize=(15, 5))
-                ax_ds[0].imshow(data.LIY[idx], origin='lower', cmap=stmpy.cm.Blues_r)
+                ax_ds[0].imshow(data.LIY[idx], origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
                 ax_ds[0].set_title(f'Raw dI/dV at {en_label}')
-                ax_ds[1].imshow(data.LIY_gc[idx], origin='lower', cmap=stmpy.cm.Blues_r)
+                ax_ds[1].imshow(data.LIY_gc[idx], origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
                 ax_ds[1].set_title(f'Global Corrected dI/dV at {en_label}')
-                ax_ds[2].imshow(data.LIY_lc[idx], origin='lower', cmap=stmpy.cm.Blues_r)
+                ax_ds[2].imshow(data.LIY_lc[idx], origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
                 ax_ds[2].set_title(f'Local Corrected dI/dV at {en_label}')
                 for a in ax_ds: 
                     a.set_axis_off()
@@ -376,9 +371,9 @@ def plot_correlation(data1, data2, xlabel=None, ylabel=None):
         r = float((xzc * yzc).sum() / denom) if denom > 0 else np.nan
 
     fig, ax = plt.subplots(1, 3, figsize=(12, 4))
-    ax[0].imshow(data1, origin='lower', cmap=stmpy.cm.Blues_r)
+    ax[0].imshow(data1, origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
     ax[0].set_title(xlabel if xlabel is not None else 'Data 1')
-    ax[1].imshow(data2, origin='lower', cmap=stmpy.cm.Blues_r)
+    ax[1].imshow(data2, origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
     ax[1].set_title(ylabel if ylabel is not None else 'Data 2')
     ax[2].scatter(xm, ym, s=10, alpha=0.7)
     if xlabel is not None:
@@ -509,13 +504,6 @@ def compute_shape_params(
     if im_show:
         plot_rk_space(data, ens=[e0, e1, e2, e3, e4, e5])
         
-        # fig, ax = plt.subplots(1, 2, figsize=(12, 5))
-        # ax[0].imshow(sp1, cmap=stmpy.cm.Blues_r)
-        # ax[0].set_title('Shape Para 1')
-        # ax[1].imshow(sp2, cmap=stmpy.cm.Blues_r)
-        # ax[1].set_title('Shape Para 2')
-        # plt.tight_layout()
-        # plt.show()
 
 def smooth_LIY(LIY, window=5, axis=0, mode='reflect'):
     """
@@ -785,29 +773,29 @@ def analyze_dos_data(data_object, crop_rect=None, scale_factor=1e12, p0=None, bo
         
         # Plot Gap Map
         im0 = axes[0].imshow(data_object.gap_map, origin='lower', aspect='equal', cmap=cmap, 
-                             extent=[0, N_X, 0, N_Y])
+                             extent=[0, N_X, 0, N_Y], interpolation='none')
         axes[0].set_title("Fitted Gap Size (edge_R - edge_L)")
         fig.colorbar(im0, ax=axes[0], label="Gap (V)")
 
         # Plot Bump Amplitude Map
         im1 = axes[1].imshow(data_object.bump_amp, origin='lower', aspect='equal', cmap=cmap, 
-                             extent=[0, N_X, 0, N_Y])
+                             extent=[0, N_X, 0, N_Y], interpolation='none')
         axes[1].set_title("Fitted Bump Amplitude")
         fig.colorbar(im1, ax=axes[1], label="Amplitude (a.u.)")
 
         # Plot Error Map
         im2 = axes[2].imshow(data_object.error_map, origin='lower', aspect='equal', cmap=cmap, 
-                             extent=[0, N_X, 0, N_Y])
+                             extent=[0, N_X, 0, N_Y], interpolation='none')
         axes[2].set_title("Fit Error (sqrt(sum(diag(pcov))))")
         fig.colorbar(im2, ax=axes[2], label="Error (a.u.)")
         
         im3 = axes[3].imshow(data_object.edge_L, origin='lower', aspect='equal', cmap=cmap,
-                             extent=[0, N_X, 0, N_Y])
+                             extent=[0, N_X, 0, N_Y], interpolation='none')
         axes[3].set_title("Fitted Valence Band Edge (edge_L)")
         fig.colorbar(im3, ax=axes[3], label="Energy (V)")
 
         im4 = axes[4].imshow(data_object.edge_R, origin='lower', aspect='equal', cmap=cmap,
-                             extent=[0, N_X, 0, N_Y])
+                             extent=[0, N_X, 0, N_Y], interpolation='none')
         axes[4].set_title("Fitted Conduction Band Edge (edge_R)")
         fig.colorbar(im4, ax=axes[4], label="Energy (V)")
 
@@ -923,25 +911,25 @@ def animate_ldos_with_topo(data, plot_range=None, interval=80, repeat=True,
 
 
     # --- Topography
-    im = ax_topo.imshow(topo_2d, origin='lower', cmap=cmap, aspect='equal')
+    im = ax_topo.imshow(topo_2d, origin='lower', cmap=cmap, aspect='equal', interpolation='none')
     cb = fig.colorbar(im, ax=ax_topo, fraction=0.046, pad=0.04)
     ax_topo.set_title("Topography")
 
     # --- Edge L
-    im2 = ax_edge_L.imshow(edge_L, origin='lower', cmap=cmap, aspect='equal')
+    im2 = ax_edge_L.imshow(edge_L, origin='lower', cmap=cmap, aspect='equal', interpolation='none')
     cb2 = fig.colorbar(im2, ax=ax_edge_L, fraction=0.046, pad=0.04)
     ax_edge_L.set_title("Valence Band Edge (edge_L)")
 
     # --- Edge R
-    im3 = ax_edge_R.imshow(edge_R, origin='lower', cmap=cmap, aspect='equal')
+    im3 = ax_edge_R.imshow(edge_R, origin='lower', cmap=cmap, aspect='equal', interpolation='none')
     cb3 = fig.colorbar(im3, ax=ax_edge_R, fraction=0.046, pad=0.04)
     ax_edge_R.set_title("Conduction Band Edge (edge_R)")
     # --- Bump Amplitude
-    im4 = ax_bump_amp.imshow(bump_amp, origin='lower', cmap=cmap, aspect='equal')
+    im4 = ax_bump_amp.imshow(bump_amp, origin='lower', cmap=cmap, aspect='equal', interpolation='none')
     cb4 = fig.colorbar(im4, ax=ax_bump_amp, fraction=0.046, pad=0.04)
     ax_bump_amp.set_title("Bump Amplitude")
     # --- Bump Position
-    im5 = ax_bump_pos.imshow(bump_pos, origin='lower', cmap=cmap, aspect='equal')
+    im5 = ax_bump_pos.imshow(bump_pos, origin='lower', cmap=cmap, aspect='equal', interpolation='none')
     cb5 = fig.colorbar(im5, ax=ax_bump_pos, fraction=0.046, pad=0.04)
     ax_bump_pos.set_title("Bump Position")
 
@@ -1052,19 +1040,19 @@ def plot_rk_space(data, ens=None):
      # in nm
     n_pixels = data.scan_info['n_pixels']    # number of pixels along one axis
 
-    ax[0,0].imshow(data.Z_ls, origin='lower',  cmap=stmpy.cm.Blues_r)
+    ax[0,0].imshow(data.Z_ls, origin='lower',  cmap=stmpy.cm.Blues_r, interpolation='none')
     ax[0,0].set_title('Z line subtracted')
 
     data.FZ_ls = stmpy.tools.fft(data.Z_ls, zeroDC=True, units='amplitude', output='absolute')
     plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax[1,0])
 
-    ax[0,1].imshow(data.shape_para1, origin='lower', cmap=stmpy.cm.Blues_r)
+    ax[0,1].imshow(data.shape_para1, origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
     ax[0,1].set_title('Shape Parameter 1')
 
     data.Fshape_para1 = stmpy.tools.fft(data.shape_para1, zeroDC=True, units='amplitude', output='absolute')
     plot_FFT_data(data.Fshape_para1, k_crop_n=0, ax=ax[1,1])
 
-    ax[0,2].imshow(data.shape_para2, origin='lower', cmap=stmpy.cm.Blues_r)
+    ax[0,2].imshow(data.shape_para2, origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
     ax[0,2].set_title('Shape Parameter 2')
 
     data.Fshape_para2 = stmpy.tools.fft(data.shape_para2, zeroDC=True, units='amplitude', output='absolute')
@@ -1074,7 +1062,7 @@ def plot_rk_space(data, ens=None):
         for en_id, en in enumerate(ens):
             # print(en_id)
             id = np.argmin(np.abs(data.en - en))
-            ax[0,3+en_id].imshow(data.LIY[id,:,:], origin='lower', cmap=stmpy.cm.Blues_r)
+            ax[0,3+en_id].imshow(data.LIY[id,:,:], origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
             ax[0,3+en_id].set_title(f'dI/dV at {en:.2f} V')
             FLIY_idx = stmpy.tools.fft(data.LIY[id,:,:], zeroDC=True, units='amplitude', output='absolute')
             plot_FFT_data(FLIY_idx, k_crop_n=0, ax=ax[1,3+en_id])
@@ -1194,11 +1182,11 @@ def cross_correlation_2d_plot(
     if plot:
         fig, axs = plt.subplots(1, 3, figsize=(14, 4), constrained_layout=True)
 
-        im0 = axs[0].imshow(A, origin="lower", cmap=stmpy.cm.Blues_r)
+        im0 = axs[0].imshow(A, origin="lower", cmap=stmpy.cm.Blues_r, interpolation='none')
         axs[0].set_title(f"{titleA} ({'high-res' if high_res_label=='A' else 'resampled'})")
         plt.colorbar(im0, ax=axs[0], fraction=0.046, pad=0.04)
 
-        im1 = axs[1].imshow(B, origin="lower", cmap=stmpy.cm.Blues_r)
+        im1 = axs[1].imshow(B, origin="lower", cmap=stmpy.cm.Blues_r, interpolation='none')
         axs[1].set_title(f"{titleB} ({'high-res' if high_res_label=='B' else 'resampled'})")
         plt.colorbar(im1, ax=axs[1], fraction=0.046, pad=0.04)
 
@@ -1208,7 +1196,7 @@ def cross_correlation_2d_plot(
 
         im2 = axs[2].imshow(
             C, origin="lower", extent=extent,
-            cmap=stmpy.cm.jason_r, norm=norm
+            cmap=stmpy.cm.jason_r, norm=norm, interpolation='none'
         )
         axs[2].plot(dx, dy, "ko", ms=3)
         axs[2].axhline(0, ls="--", c="gray")
@@ -1352,7 +1340,7 @@ def plot_topo_and_energy_energy_correlations_sharedx_square(
         cmap=cmap_corr,
         norm=norm,
         extent=[ens[0], ens[-1], ens[0], ens[-1]],
-        aspect="equal",
+        aspect="equal", interpolation='none'
     )
     ax1.set_box_aspect(1)     # square panel
     ax1.set_xlim(ens[0], ens[-1])  # enforce shared x-range to match matrix
