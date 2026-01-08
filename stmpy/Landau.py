@@ -85,16 +85,23 @@ def remove_bg(x: np.ndarray,
     else:
         y_out = y - bg
     if plot_bg:
-        plt.figure()
-        plt.plot(x*1e3, y, label='Original Data' if labels is None else labels + ' Data', color='k', linewidth=0.5)
-        plt.plot(x*1e3, bg, label='Fitted Background' if labels is None else labels + ' Background', color='gray', linewidth=1)
-        plt.xlabel('Bias voltage (mV)')
-        plt.ylabel('dI/dV (arb. units)')
-        plt.xlim(100,280)
-        plt.legend()
+        # 2 axes: data and fitted background and residual
+        fig, ax = plt.subplots(2,1, figsize=(4,8), sharex=True)
+        ax[0].plot(x*1e3, y, label='Original Data' if labels is None else labels + ' Data', color='k', linewidth=0.5)
+        ax[0].plot(x*1e3, bg, label='Fitted Background' if labels is None else labels + ' Background', color='gray', linewidth=1)
+        ax[0].set_ylabel('dI/dV (arb. units)')
+        ax[0].set_xlim(100,280)
+        ax[0].legend()
+
+        ax[1].plot(x*1e3, y_out, label='Background Removed' if labels is None else labels + ' BG Removed', color='b', linewidth=0.5)
+        ax[1].set_xlabel('Bias voltage (mV)')
+        ax[1].set_ylabel('dI/dV (arb. units)')
+        ax[1].set_xlim(100,280)
+        ax[1].legend()
         if savename is not None:
             plt.savefig(savename)
         plt.show()
+    
 
     return x.copy(), y_out, coeff
 
