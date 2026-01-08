@@ -34,6 +34,10 @@ def thin_colorbar(title):
     )
 
 
+def maybe_colorbar(title, show=True):
+    return thin_colorbar(title) if show else None
+
+
 def fft_log_image(F2):
     """Robust FFT visualization: log10(|F| + eps)."""
     mag = np.abs(F2)
@@ -44,13 +48,18 @@ def fft_log_image(F2):
 # Global in-memory storage for large arrays
 # ---------------------------------------------------------------------
 GLOBAL_DATA = {
-    "en": None,          # (E,)
-    "LIY": None,         # (E, I, J)
-    "LIY_smooth": None,  # (E, I, J)
-    "FLIY_smooth": None, # (E, I, J) FFT cube
-    "FZ_ls": None,       # (I, J) FFT topo
-    "topo": None,        # (I, J) low-res topo (Z_ls)
-    "topo_high": None,   # (I_hr, J_hr) high-res topo (Z_ls)
+    "en": None,           # (E,)
+    "LIY": None,          # (E, I, J)
+    "LIY_smooth": None,   # (E, I, J)
+    "FLIY_smooth": None,  # (E, I, J)
+    "FZ_ls": None,        # (I, J)
+    "topo": None,         # (I, J)
+    "topo_high": None,    # (I_hr, J_hr)
+
+    # normalized products
+    "LIY_norm": None,     # (E, I, J)
+    "FLIY_norm": None,    # (E, I, J)
+    "area_map": None,     # (I, J)
 }
 
 
@@ -75,7 +84,7 @@ def load_sm4_from_bytes(file_bytes, filename):
     LIY_smoothed = np.asarray(data.LIY_smoothed)     # (E, I, J)
     FLIY_smoothed = np.asarray(data.FLIY_smoothed)   # (E, I, J)
     topo = np.asarray(data.Z_ls)                     # (I, J)
-    FZ_ls = np.asarray(data.FZ_ls)                   # (I, J) (complex or real)
+    FZ_ls = np.asarray(data.FZ_ls)                   # (I, J)
 
     assert LIY.ndim == 3, "LIY must be (E, I, J)"
     assert LIY_smoothed.shape == LIY.shape, "LIY_smoothed must match LIY shape"
@@ -136,7 +145,6 @@ app.index_string = """
         {%favicon%}
         {%css%}
         <style>
-        /* Move modebar above each plot so it doesn't cover the image */
         .js-plotly-plot .plotly .modebar {
             top: -2000px !important;
         }
@@ -157,9 +165,10 @@ app.layout = html.Div(
     style={"fontFamily": "Arial", "margin": "10px"},
     children=[
         html.Div(
-            style={"display": "flex", "alignItems": "center", "marginBottom": "5px"},
+            style={"display": "flex", "alignItems": "center", "marginBottom": "6px", "gap": "10px"},
             children=[
-                html.H3("RHK LDOS Map Viewer", style={"margin": "0 15px 0 0"}),
+                html.H3("RHK LDOS Map Viewer", style={"margin": "0 10px 0 0"}),
+
                 dcc.Upload(
                     id="upload-data",
                     children=html.Div(["LDOS file: Drag & Drop or ", html.A("Select .sm4")]),
@@ -174,6 +183,7 @@ app.layout = html.Div(
                     },
                     multiple=False,
                 ),
+
                 dcc.Upload(
                     id="upload-topo-hires",
                     children=html.Div(["High-res topo: Drag & Drop or ", html.A("Select .sm4")]),
@@ -185,13 +195,39 @@ app.layout = html.Div(
                         "textAlign": "center",
                         "padding": "2px 8px",
                         "fontSize": "12px",
-                        "marginLeft": "10px",
                     },
                     multiple=False,
                 ),
+
+                html.Div(
+                    style={"display": "flex", "alignItems": "center", "gap": "6px", "marginLeft": "10px"},
+                    children=[
+                        html.Div("Normalize area:", style={"fontSize": "12px", "color": "#333"}),
+                        html.Span("E1", style={"fontSize": "12px"}),
+                        dcc.Input(
+                            id="norm-e1",
+                            type="number",
+                            step=0.001,
+                            debounce=True,
+                            style={"width": "90px", "fontSize": "12px"},
+                            placeholder="-0.05",
+                        ),
+                        html.Span("E2", style={"fontSize": "12px"}),
+                        dcc.Input(
+                            id="norm-e2",
+                            type="number",
+                            step=0.001,
+                            debounce=True,
+                            style={"width": "90px", "fontSize": "12px"},
+                            placeholder="0.05",
+                        ),
+                        html.Div(id="norm-status", style={"fontSize": "12px", "color": "#666", "marginLeft": "8px"}),
+                    ],
+                ),
+
                 html.Div(
                     id="file-info",
-                    style={"marginLeft": "15px", "fontStyle": "italic", "color": "#555", "fontSize": "12px"},
+                    style={"marginLeft": "10px", "fontStyle": "italic", "color": "#555", "fontSize": "12px"},
                 ),
             ],
         ),
@@ -200,45 +236,38 @@ app.layout = html.Div(
         dcc.Store(id="hires-store"),
         dcc.Store(id="fov-store"),
         dcc.Store(id="selected-point-store"),
+        dcc.Store(id="norm-store"),
 
-        # Top row: 4 panels (Topo, FFT(Z), LIY_smooth, FFT(FLIY_smooth))
+        # ---------------- Row 1: 5 panels ----------------
         html.Div(
-            style={"display": "flex", "flexDirection": "row", "height": "360px"},
+            style={"display": "flex", "flexDirection": "row", "height": "300px"},
             children=[
-                html.Div(
-                    style={"flex": "1", "marginRight": "6px"},
-                    children=[
-                        html.Div("Topo (LDOS)", style={"fontSize": "12px", "marginBottom": "2px"}),
-                        dcc.Graph(id="topo-graph", style={"height": "340px"}, config={"displayModeBar": True}),
-                    ],
-                ),
-                html.Div(
-                    style={"flex": "1", "margin": "0 6px"},
-                    children=[
-                        html.Div("FFT (FZ_ls)", style={"fontSize": "12px", "marginBottom": "2px"}),
-                        dcc.Graph(id="fzfft-graph", style={"height": "340px"}, config={"displayModeBar": True}),
-                    ],
-                ),
-                html.Div(
-                    style={"flex": "1", "margin": "0 6px"},
-                    children=[
-                        html.Div("LIY (smoothed)", style={"fontSize": "12px", "marginBottom": "2px"}),
-                        dcc.Graph(id="liy-smooth-graph", style={"height": "340px"}, config={"displayModeBar": True}),
-                    ],
-                ),
-                html.Div(
-                    style={"flex": "1", "marginLeft": "6px"},
-                    children=[
-                        html.Div("FFT (FLIY_smoothed)", style={"fontSize": "12px", "marginBottom": "2px"}),
-                        dcc.Graph(id="fft-graph", style={"height": "340px"}, config={"displayModeBar": True}),
-                    ],
-                ),
+                html.Div(style={"flex": "1", "marginRight": "4px"}, children=[
+                    html.Div("Topo (LDOS)", style={"fontSize": "12px", "marginBottom": "2px"}),
+                    dcc.Graph(id="topo-graph", style={"height": "280px"}, config={"displayModeBar": True}),
+                ]),
+                html.Div(style={"flex": "1", "margin": "0 4px"}, children=[
+                    html.Div("FFT (FZ_ls)", style={"fontSize": "12px", "marginBottom": "2px"}),
+                    dcc.Graph(id="fzfft-graph", style={"height": "280px"}, config={"displayModeBar": True}),
+                ]),
+                html.Div(style={"flex": "1", "margin": "0 4px"}, children=[
+                    html.Div("LIY (smoothed)", style={"fontSize": "12px", "marginBottom": "2px"}),
+                    dcc.Graph(id="liy-smooth-graph", style={"height": "280px"}, config={"displayModeBar": True}),
+                ]),
+                html.Div(style={"flex": "1", "margin": "0 4px"}, children=[
+                    html.Div("FFT (FLIY_smoothed)", style={"fontSize": "12px", "marginBottom": "2px"}),
+                    dcc.Graph(id="fft-graph", style={"height": "280px"}, config={"displayModeBar": True}),
+                ]),
+                html.Div(style={"flex": "1", "marginLeft": "4px"}, children=[
+                    html.Div("High-res topo (Z_ls)", style={"fontSize": "12px", "marginBottom": "2px"}),
+                    dcc.Graph(id="topo-hires-graph", style={"height": "280px"}, config={"displayModeBar": True}),
+                ]),
             ],
         ),
 
-        # Middle: energy slider + label
+        # Energy slider
         html.Div(
-            style={"display": "flex", "alignItems": "center", "margin": "4px 4px 2px 4px"},
+            style={"display": "flex", "alignItems": "center", "margin": "6px 4px 4px 4px"},
             children=[
                 html.Div("Energy slice:", style={"fontSize": "12px", "marginRight": "8px"}),
                 html.Div(
@@ -256,24 +285,22 @@ app.layout = html.Div(
             ],
         ),
 
-        # Bottom row: LDOS spectrum + high-res topo
+        # ---------------- Row 2: 3 panels ----------------
         html.Div(
-            style={"display": "flex", "flexDirection": "row", "height": "340px", "marginTop": "2px"},
+            style={"display": "flex", "flexDirection": "row", "height": "320px", "marginTop": "6px"},
             children=[
-                html.Div(
-                    style={"flex": "1", "marginRight": "6px"},
-                    children=[
-                        html.Div("LDOS at selected point", style={"fontSize": "12px", "marginBottom": "2px"}),
-                        dcc.Graph(id="ldos-graph", style={"height": "320px"}, config={"displayModeBar": True}),
-                    ],
-                ),
-                html.Div(
-                    style={"flex": "1", "marginLeft": "6px"},
-                    children=[
-                        html.Div("High-res topo (Z_ls)", style={"fontSize": "12px", "marginBottom": "2px"}),
-                        dcc.Graph(id="topo-hires-graph", style={"height": "320px"}, config={"displayModeBar": True}),
-                    ],
-                ),
+                html.Div(style={"flex": "1", "marginRight": "6px"}, children=[
+                    html.Div("LIY_norm", style={"fontSize": "12px", "marginBottom": "2px"}),
+                    dcc.Graph(id="liy-norm-graph", style={"height": "300px"}, config={"displayModeBar": True}),
+                ]),
+                html.Div(style={"flex": "1", "margin": "0 6px"}, children=[
+                    html.Div("FFT (FLIY_norm)", style={"fontSize": "12px", "marginBottom": "2px"}),
+                    dcc.Graph(id="fft-norm-graph", style={"height": "300px"}, config={"displayModeBar": True}),
+                ]),
+                html.Div(style={"flex": "1", "marginLeft": "6px"}, children=[
+                    html.Div("LDOS at selected point", style={"fontSize": "12px", "marginBottom": "2px"}),
+                    dcc.Graph(id="ldos-graph", style={"height": "300px"}, config={"displayModeBar": True}),
+                ]),
             ],
         ),
     ],
@@ -282,6 +309,7 @@ app.layout = html.Div(
 
 # ---------------------------------------------------------------------
 # Callback 1: handle LDOS upload, store big arrays on server
+# ALSO sets default E1/E2 in the inputs
 # ---------------------------------------------------------------------
 @app.callback(
     Output("data-store", "data"),
@@ -289,6 +317,8 @@ app.layout = html.Div(
     Output("energy-slider", "min"),
     Output("energy-slider", "max"),
     Output("energy-slider", "value"),
+    Output("norm-e1", "value"),
+    Output("norm-e2", "value"),
     Input("upload-data", "contents"),
     State("upload-data", "filename"),
     prevent_initial_call=True,
@@ -301,22 +331,37 @@ def handle_upload(contents, filename):
     E, I, J = LIY.shape
     order = np.argsort(en)
 
-    GLOBAL_DATA["en"] = en[order]
+    en_sorted = en[order]
+    GLOBAL_DATA["en"] = en_sorted
     GLOBAL_DATA["LIY"] = LIY[order, :, :]
     GLOBAL_DATA["LIY_smooth"] = LIY_smooth[order, :, :]
     GLOBAL_DATA["FLIY_smooth"] = FLIY_smooth[order, :, :]
     GLOBAL_DATA["topo"] = topo
     GLOBAL_DATA["FZ_ls"] = FZ_ls
 
-    data_store = {"I": int(I), "J": int(J), "E": int(E)}
+    # clear old normalization products
+    GLOBAL_DATA["LIY_norm"] = None
+    GLOBAL_DATA["FLIY_norm"] = None
+    GLOBAL_DATA["area_map"] = None
 
+    data_store = {"I": int(I), "J": int(J), "E": int(E)}
     info = f"Loaded LDOS: {filename} | (E, I, J) = {LIY.shape}"
 
     emin = 0
     emax = E - 1
     e0 = E // 2
 
-    return data_store, info, emin, emax, e0
+    # default normalization window around 0V, clamped to range
+    e_min = float(en_sorted[0])
+    e_max = float(en_sorted[-1])
+    width = 0.05
+    e1_default = max(e_min, min(0.0 - width, e_max))
+    e2_default = max(e_min, min(0.0 + width, e_max))
+    if e2_default <= e1_default:
+        e1_default = e_min + 0.25 * (e_max - e_min)
+        e2_default = e_min + 0.75 * (e_max - e_min)
+
+    return data_store, info, emin, emax, e0, e1_default, e2_default
 
 
 # ---------------------------------------------------------------------
@@ -357,27 +402,68 @@ def update_energy_label(e_idx, data_store):
 
 
 # ---------------------------------------------------------------------
-# Callback 2: shared FOV store (fractional coordinates in [0,1])
-# (sync: topo, LIY_smooth, topo-hires ONLY)
+# Compute LIY_norm / FLIY_norm whenever E1/E2 change
+# ---------------------------------------------------------------------
+@app.callback(
+    Output("norm-store", "data"),
+    Output("norm-status", "children"),
+    Input("data-store", "data"),
+    Input("norm-e1", "value"),
+    Input("norm-e2", "value"),
+    prevent_initial_call=True,
+)
+def recompute_norm(data_store, E1, E2):
+    if data_store is None or GLOBAL_DATA["en"] is None or GLOBAL_DATA["LIY_smooth"] is None:
+        raise dash.exceptions.PreventUpdate
+
+    if E1 is None or E2 is None:
+        return dash.no_update, "set E1/E2"
+
+    en = GLOBAL_DATA["en"]
+    LIY_sm = GLOBAL_DATA["LIY_smooth"]
+
+    E1 = float(E1)
+    E2 = float(E2)
+    if E2 < E1:
+        E1, E2 = E2, E1
+
+    # clamp to range
+    E1c = max(float(en[0]), min(float(en[-1]), E1))
+    E2c = max(float(en[0]), min(float(en[-1]), E2))
+    if E2c <= E1c:
+        E2c = min(float(en[-1]), E1c + 1e-6)
+
+    LIY_norm, FLIY_norm, area_map = normalize_LIY_by_area(en, LIY_sm, E1c, E2c)
+
+    GLOBAL_DATA["LIY_norm"] = np.asarray(LIY_norm)
+    GLOBAL_DATA["FLIY_norm"] = np.asarray(FLIY_norm)
+    GLOBAL_DATA["area_map"] = np.asarray(area_map)
+
+    return {"E1": E1c, "E2": E2c}, f"ok: [{E1c:.4f}, {E2c:.4f}] V"
+
+
+# ---------------------------------------------------------------------
+# Shared FOV store (fractional coordinates in [0,1])
+# sync: topo, LIY_smooth, LIY_norm, topo-hires
 # ---------------------------------------------------------------------
 @app.callback(
     Output("fov-store", "data"),
     Input("topo-graph", "relayoutData"),
     Input("liy-smooth-graph", "relayoutData"),
+    Input("liy-norm-graph", "relayoutData"),
     Input("topo-hires-graph", "relayoutData"),
     Input("data-store", "data"),
     Input("hires-store", "data"),
     State("fov-store", "data"),
     prevent_initial_call=True,
 )
-def update_fov(topo_relayout, smooth_relayout, hires_relayout,
+def update_fov(topo_relayout, smooth_relayout, norm_relayout, hires_relayout,
                data_store, hires_store, fov_state):
     ctx = callback_context
     if not ctx.triggered:
         raise dash.exceptions.PreventUpdate
 
     trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-
     full_fov = {"fi0": 0.0, "fi1": 1.0, "fj0": 0.0, "fj1": 1.0}
 
     if trigger_id in ["data-store", "hires-store"]:
@@ -393,6 +479,11 @@ def update_fov(topo_relayout, smooth_relayout, hires_relayout,
         I = data_store["I"]; J = data_store["J"]
     elif trigger_id == "liy-smooth-graph":
         rel = smooth_relayout
+        if data_store is None:
+            raise dash.exceptions.PreventUpdate
+        I = data_store["I"]; J = data_store["J"]
+    elif trigger_id == "liy-norm-graph":
+        rel = norm_relayout
         if data_store is None:
             raise dash.exceptions.PreventUpdate
         I = data_store["I"]; J = data_store["J"]
@@ -465,19 +556,20 @@ def crop_indices_from_fov(fov, I, J):
 
 
 # ---------------------------------------------------------------------
-# Callback: shared selected point (fi,fj) from clicks on real-space panels
-# (sync: topo, LIY_smooth, topo-hires ONLY)
+# Shared selected point (fi,fj) from clicks on real-space panels
+# sync: topo, LIY_smooth, LIY_norm, topo-hires
 # ---------------------------------------------------------------------
 @app.callback(
     Output("selected-point-store", "data"),
     Input("topo-graph", "clickData"),
     Input("liy-smooth-graph", "clickData"),
+    Input("liy-norm-graph", "clickData"),
     Input("topo-hires-graph", "clickData"),
     State("data-store", "data"),
     State("hires-store", "data"),
     prevent_initial_call=True,
 )
-def update_selected_point(topo_click, smooth_click, hires_click, data_store, hires_store):
+def update_selected_point(topo_click, smooth_click, norm_click, hires_click, data_store, hires_store):
     ctx = callback_context
     if not ctx.triggered:
         raise dash.exceptions.PreventUpdate
@@ -500,6 +592,11 @@ def update_selected_point(topo_click, smooth_click, hires_click, data_store, hir
         if x is None or y is None or data_store is None:
             raise dash.exceptions.PreventUpdate
         I = data_store["I"]; J = data_store["J"]
+    elif trigger_id == "liy-norm-graph":
+        x, y = extract_point(norm_click)
+        if x is None or y is None or data_store is None:
+            raise dash.exceptions.PreventUpdate
+        I = data_store["I"]; J = data_store["J"]
     elif trigger_id == "topo-hires-graph":
         x, y = extract_point(hires_click)
         if x is None or y is None or hires_store is None:
@@ -518,7 +615,7 @@ def update_selected_point(topo_click, smooth_click, hires_click, data_store, hir
 
 
 # ---------------------------------------------------------------------
-# Topo plot (low-res) with shared FOV & marker
+# Topo plot (low-res) - Row 1 (NO colorbar)
 # ---------------------------------------------------------------------
 @app.callback(
     Output("topo-graph", "figure"),
@@ -542,15 +639,14 @@ def update_topo(data_store, fov, selected_point):
     x = np.arange(j0, j0 + Jj)
     y = np.arange(i0, i0 + Ii)
 
+    show_cb = False
+
     fig = go.Figure(
-        data=[
-            go.Heatmap(
-                z=topo_crop,
-                x=x, y=y,
-                colorscale=colorscale,
-                colorbar=thin_colorbar("Z_ls"),
-            )
-        ]
+        data=[go.Heatmap(
+            z=topo_crop, x=x, y=y,
+            colorscale=colorscale,
+            colorbar=maybe_colorbar("Z_ls", show_cb),
+        )]
     )
 
     if selected_point is not None:
@@ -559,25 +655,23 @@ def update_topo(data_store, fov, selected_point):
         i_sel = int(round(fi * (I - 1))) if I > 1 else 0
         j_sel = int(round(fj * (J - 1))) if J > 1 else 0
         if i0 <= i_sel <= i1 and j0 <= j_sel <= j1:
-            fig.add_trace(
-                go.Scatter(
-                    x=[j_sel], y=[i_sel],
-                    mode="markers",
-                    marker=dict(symbol="circle-open", size=5, line=dict(width=2, color="black")),
-                    showlegend=False,
-                )
-            )
+            fig.add_trace(go.Scatter(
+                x=[j_sel], y=[i_sel],
+                mode="markers",
+                marker=dict(symbol="circle-open", size=5, line=dict(width=2, color="black")),
+                showlegend=False,
+            ))
 
     fig.update_layout(
         xaxis=dict(title="j", constrain="domain", scaleanchor="y", scaleratio=1),
-        yaxis=dict(title="i", domain=[0, 0.9]),
-        margin=dict(l=40, r=10, t=10, b=30),
+        yaxis=dict(title="i", domain=[0, 0.95]),
+        margin=dict(l=35, r=5, t=10, b=28),
     )
     return fig
 
 
 # ---------------------------------------------------------------------
-# LIY (smoothed) map with shared FOV & marker
+# LIY (smoothed) - Row 1 (NO colorbar)
 # ---------------------------------------------------------------------
 @app.callback(
     Output("liy-smooth-graph", "figure"),
@@ -606,16 +700,14 @@ def update_liy_smooth(data_store, fov, e_idx, selected_point):
     y = np.arange(i0, i0 + Ii)
 
     colorscale = mpl_to_plotly(stmpy.cm.Blues_r)
+    show_cb = False
 
     fig = go.Figure(
-        data=[
-            go.Heatmap(
-                z=liy_slice,
-                x=x, y=y,
-                colorscale=colorscale,
-                colorbar=thin_colorbar("LIY_s"),
-            )
-        ]
+        data=[go.Heatmap(
+            z=liy_slice, x=x, y=y,
+            colorscale=colorscale,
+            colorbar=maybe_colorbar("LIY_s", show_cb),
+        )]
     )
 
     if selected_point is not None:
@@ -624,23 +716,21 @@ def update_liy_smooth(data_store, fov, e_idx, selected_point):
         i_sel = int(round(fi * (I - 1))) if I > 1 else 0
         j_sel = int(round(fj * (J - 1))) if J > 1 else 0
         if i0 <= i_sel <= i1 and j0 <= j_sel <= j1:
-            fig.add_trace(
-                go.Scatter(
-                    x=[j_sel], y=[i_sel],
-                    mode="markers",
-                    marker=dict(symbol="circle-open", size=5, line=dict(width=2, color="black")),
-                    showlegend=False,
-                )
-            )
+            fig.add_trace(go.Scatter(
+                x=[j_sel], y=[i_sel],
+                mode="markers",
+                marker=dict(symbol="circle-open", size=5, line=dict(width=2, color="black")),
+                showlegend=False,
+            ))
 
     fig.update_layout(
         xaxis=dict(title="j", constrain="domain", scaleanchor="y", scaleratio=1),
-        yaxis=dict(title="i", domain=[0, 0.9]),
-        margin=dict(l=40, r=10, t=10, b=30),
+        yaxis=dict(title="i", domain=[0, 0.95]),
+        margin=dict(l=35, r=5, t=10, b=28),
     )
 
     fig.add_annotation(
-        x=0.75, y=0.9, xref="paper", yref="paper",
+        x=0.95, y=0.92, xref="paper", yref="paper",
         xanchor="right", yanchor="top",
         text=f"E={en[e_idx]:.2f} V",
         showarrow=False,
@@ -652,7 +742,7 @@ def update_liy_smooth(data_store, fov, e_idx, selected_point):
 
 
 # ---------------------------------------------------------------------
-# FFT(Z_ls): data.FZ_ls (same FFT colorscale as other FFT)
+# FFT(Z_ls): data.FZ_ls - Row 1 (NO colorbar)
 # ---------------------------------------------------------------------
 @app.callback(
     Output("fzfft-graph", "figure"),
@@ -666,7 +756,6 @@ def update_fzfft(data_store):
     F2 = GLOBAL_DATA["FZ_ls"]
     I, J = F2.shape
 
-    # z = fft_log_image(F2)
     z = F2
     z_flat = F2[np.isfinite(F2)]
     mu = np.mean(z_flat)
@@ -679,29 +768,27 @@ def update_fzfft(data_store):
     ky = np.arange(I) - (I // 2)
 
     colorscale_fft = mpl_to_plotly(stmpy.cm.gray_r)
+    show_cb = False
 
     fig = go.Figure(
-        data=[
-            go.Heatmap(
-                z=z,
-                x=kx, y=ky,
-                colorscale=colorscale_fft,
-                zmin=zmin,zmax=zmax,
-                colorbar=thin_colorbar("a.u."),
-            )
-        ]
+        data=[go.Heatmap(
+            z=z, x=kx, y=ky,
+            colorscale=colorscale_fft,
+            zmin=zmin, zmax=zmax,
+            colorbar=maybe_colorbar("a.u.", show_cb),
+        )]
     )
 
     fig.update_layout(
         xaxis=dict(title="kx (index)", constrain="domain", scaleanchor="y", scaleratio=1),
-        yaxis=dict(title="ky (index)", domain=[0, 0.9]),
-        margin=dict(l=40, r=10, t=10, b=30),
+        yaxis=dict(title="ky (index)", domain=[0, 0.95]),
+        margin=dict(l=35, r=5, t=10, b=28),
     )
     return fig
 
 
 # ---------------------------------------------------------------------
-# FFT(LIY_smoothed): data.FLIY_smoothed
+# FFT(LIY_smoothed): data.FLIY_smoothed - Row 1 (NO colorbar)
 # ---------------------------------------------------------------------
 @app.callback(
     Output("fft-graph", "figure"),
@@ -721,7 +808,6 @@ def update_fft(data_store, e_idx):
     e_idx = max(0, min(E - 1, e_idx))
 
     F2 = F[e_idx, :, :]
-    # z = fft_log_image(F2)
     z = F2
 
     z_flat = F2[np.isfinite(F2)]
@@ -735,28 +821,25 @@ def update_fft(data_store, e_idx):
     ky = np.arange(I) - (I // 2)
 
     colorscale_fft = mpl_to_plotly(stmpy.cm.gray_r)
+    show_cb = False
 
     fig = go.Figure(
-        data=[
-            go.Heatmap(
-                z=z,
-                x=kx, y=ky,
-                colorscale=colorscale_fft,
-                zmin=zmin,
-                zmax=zmax,
-                colorbar=thin_colorbar("a.u."),
-            )
-        ]
+        data=[go.Heatmap(
+            z=z, x=kx, y=ky,
+            colorscale=colorscale_fft,
+            zmin=zmin, zmax=zmax,
+            colorbar=maybe_colorbar("a.u.", show_cb),
+        )]
     )
 
     fig.update_layout(
         xaxis=dict(title="kx (index)", constrain="domain", scaleanchor="y", scaleratio=1),
-        yaxis=dict(title="ky (index)", domain=[0, 0.9]),
-        margin=dict(l=40, r=10, t=10, b=30),
+        yaxis=dict(title="ky (index)", domain=[0, 0.95]),
+        margin=dict(l=35, r=5, t=10, b=28),
     )
 
     fig.add_annotation(
-        x=0.95, y=0.9, xref="paper", yref="paper",
+        x=0.95, y=0.92, xref="paper", yref="paper",
         xanchor="right", yanchor="top",
         text=f"E={en[e_idx]:.2f} V",
         showarrow=False,
@@ -769,7 +852,7 @@ def update_fft(data_store, e_idx):
 
 
 # ---------------------------------------------------------------------
-# High-res topo with shared FOV & marker
+# High-res topo - Row 1 (NO colorbar)
 # ---------------------------------------------------------------------
 @app.callback(
     Output("topo-hires-graph", "figure"),
@@ -793,16 +876,14 @@ def update_topo_hires(hires_store, fov, selected_point):
     y = np.arange(i0, i0 + Ii)
 
     colorscale = mpl_to_plotly(stmpy.cm.Blues_r)
+    show_cb = False
 
     fig = go.Figure(
-        data=[
-            go.Heatmap(
-                z=topo_crop,
-                x=x, y=y,
-                colorscale=colorscale,
-                colorbar=thin_colorbar("Z_ls"),
-            )
-        ]
+        data=[go.Heatmap(
+            z=topo_crop, x=x, y=y,
+            colorscale=colorscale,
+            colorbar=maybe_colorbar("Z_ls", show_cb),
+        )]
     )
 
     if selected_point is not None:
@@ -811,19 +892,153 @@ def update_topo_hires(hires_store, fov, selected_point):
         i_sel = int(round(fi * (I_hr - 1))) if I_hr > 1 else 0
         j_sel = int(round(fj * (J_hr - 1))) if J_hr > 1 else 0
         if i0 <= i_sel <= i1 and j0 <= j_sel <= j1:
-            fig.add_trace(
-                go.Scatter(
-                    x=[j_sel], y=[i_sel],
-                    mode="markers",
-                    marker=dict(symbol="circle-open", size=5, line=dict(width=2, color="black")),
-                    showlegend=False,
-                )
-            )
+            fig.add_trace(go.Scatter(
+                x=[j_sel], y=[i_sel],
+                mode="markers",
+                marker=dict(symbol="circle-open", size=5, line=dict(width=2, color="black")),
+                showlegend=False,
+            ))
 
     fig.update_layout(
         xaxis=dict(title="j (hi-res)", constrain="domain", scaleanchor="y", scaleratio=1),
-        yaxis=dict(title="i (hi-res)", domain=[0, 0.9]),
-        margin=dict(l=40, r=10, t=10, b=30),
+        yaxis=dict(title="i (hi-res)", domain=[0, 0.95]),
+        margin=dict(l=35, r=5, t=10, b=28),
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------
+# LIY_norm - Row 2 (WITH colorbar)
+# ---------------------------------------------------------------------
+@app.callback(
+    Output("liy-norm-graph", "figure"),
+    Input("data-store", "data"),
+    Input("norm-store", "data"),
+    Input("fov-store", "data"),
+    Input("energy-slider", "value"),
+    Input("selected-point-store", "data"),
+    prevent_initial_call=True,
+)
+def update_liy_norm(data_store, norm_store, fov, e_idx, selected_point):
+    if GLOBAL_DATA["LIY_norm"] is None or data_store is None or norm_store is None:
+        return go.Figure()
+
+    LIY_norm = GLOBAL_DATA["LIY_norm"]
+    en = GLOBAL_DATA["en"]
+    E, I, J = LIY_norm.shape
+
+    e_idx = E // 2 if e_idx is None else int(e_idx)
+    e_idx = max(0, min(E - 1, e_idx))
+
+    i0, i1, j0, j1 = crop_indices_from_fov(fov, I, J)
+    liy_slice = LIY_norm[e_idx, i0:i1 + 1, j0:j1 + 1]
+    Ii, Jj = liy_slice.shape
+
+    x = np.arange(j0, j0 + Jj)
+    y = np.arange(i0, i0 + Ii)
+
+    colorscale = mpl_to_plotly(stmpy.cm.Blues_r)
+    show_cb = True
+
+    fig = go.Figure(
+        data=[go.Heatmap(
+            z=liy_slice, x=x, y=y,
+            colorscale=colorscale,
+            colorbar=maybe_colorbar("LIY_n", show_cb),
+        )]
+    )
+
+    if selected_point is not None:
+        fi = selected_point.get("fi", 0.5)
+        fj = selected_point.get("fj", 0.5)
+        i_sel = int(round(fi * (I - 1))) if I > 1 else 0
+        j_sel = int(round(fj * (J - 1))) if J > 1 else 0
+        if i0 <= i_sel <= i1 and j0 <= j_sel <= j1:
+            fig.add_trace(go.Scatter(
+                x=[j_sel], y=[i_sel],
+                mode="markers",
+                marker=dict(symbol="circle-open", size=5, line=dict(width=2, color="black")),
+                showlegend=False,
+            ))
+
+    fig.update_layout(
+        xaxis=dict(title="j", constrain="domain", scaleanchor="y", scaleratio=1),
+        yaxis=dict(title="i", domain=[0, 0.9]),
+        margin=dict(l=45, r=10, t=10, b=30),
+    )
+
+    fig.add_annotation(
+        x=0.95, y=0.9, xref="paper", yref="paper",
+        xanchor="right", yanchor="top",
+        text=f"E={en[e_idx]:.2f} V",
+        showarrow=False,
+        bgcolor="rgba(255,255,255,0.75)",
+        borderpad=3,
+        font=dict(size=12, color="black"),
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------
+# FFT(FLIY_norm) - Row 2 (WITH colorbar)
+# ---------------------------------------------------------------------
+@app.callback(
+    Output("fft-norm-graph", "figure"),
+    Input("data-store", "data"),
+    Input("norm-store", "data"),
+    Input("energy-slider", "value"),
+    prevent_initial_call=True,
+)
+def update_fft_norm(data_store, norm_store, e_idx):
+    if GLOBAL_DATA["FLIY_norm"] is None or data_store is None or norm_store is None:
+        return go.Figure()
+
+    F = GLOBAL_DATA["FLIY_norm"]
+    en = GLOBAL_DATA["en"]
+    E, I, J = F.shape
+
+    e_idx = E // 2 if e_idx is None else int(e_idx)
+    e_idx = max(0, min(E - 1, e_idx))
+
+    F2 = F[e_idx, :, :]
+    z = F2
+
+    z_flat = F2[np.isfinite(F2)]
+    mu = np.mean(z_flat)
+    sigma = np.std(z_flat)
+
+    zmin = np.max([np.min(z_flat), 0, mu - 2 * sigma])
+    zmax = np.min([np.max(z_flat), mu + 2 * sigma])
+
+    kx = np.arange(J) - (J // 2)
+    ky = np.arange(I) - (I // 2)
+
+    colorscale_fft = mpl_to_plotly(stmpy.cm.gray_r)
+    show_cb = True
+
+    fig = go.Figure(
+        data=[go.Heatmap(
+            z=z, x=kx, y=ky,
+            colorscale=colorscale_fft,
+            zmin=zmin, zmax=zmax,
+            colorbar=maybe_colorbar("a.u.", show_cb),
+        )]
+    )
+
+    fig.update_layout(
+        xaxis=dict(title="kx (index)", constrain="domain", scaleanchor="y", scaleratio=1),
+        yaxis=dict(title="ky (index)", domain=[0, 0.9]),
+        margin=dict(l=45, r=10, t=10, b=30),
+    )
+
+    fig.add_annotation(
+        x=0.95, y=0.9, xref="paper", yref="paper",
+        xanchor="right", yanchor="top",
+        text=f"E={en[e_idx]:.2f} V",
+        showarrow=False,
+        bgcolor="rgba(255,255,255,0.75)",
+        borderpad=3,
+        font=dict(size=12, color="black"),
     )
     return fig
 
@@ -887,7 +1102,7 @@ def update_ldos(selected_point, data_store, e_idx):
     fig.update_layout(
         xaxis=dict(title="Bias (V)"),
         yaxis=dict(title="dI/dV (a.u.)"),
-        margin=dict(l=50, r=10, t=10, b=40),
+        margin=dict(l=55, r=10, t=10, b=40),
         legend=dict(x=0.02, y=0.98, font=dict(size=10)),
         title=dict(text=f"LDOS at (i, j) = ({i}, {j})", x=0.5, y=0.95, font=dict(size=10)),
     )

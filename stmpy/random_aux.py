@@ -1070,7 +1070,7 @@ def plot_rk_space(data, ens=None):
     for ax in ax[0,:]:
         ax.set_xlabel('x (nm)')
         ax.set_ylabel('y (nm)')
-        print(data.scan_info['scan_size'], data.scan_info['n_pixels'])
+        # print(data.scan_info['scan_size'], data.scan_info['n_pixels'])
         stmpy.image.add_scale_bar(5, data.scan_info['scan_size'], data.scan_info['n_pixels'], fs=12, pad=0.1, ax=ax)
 
 
