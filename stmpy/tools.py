@@ -3034,6 +3034,158 @@ def fourier_filter(data, freq, sigma, method='disk', envelope=False):
 
 
 
+import numpy as np
+import stmpy
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+def cdw_intensity_map(data, Q, radius,
+                      method="gaussian",
+                      shift_to_center=True,
+                      window="None", zeroDC=True, beta=1.0,
+                      crop_n=0, show_option='absolute',
+                      show=False):
+    """
+    Extract CDW intensity (amplitude) map from a single FFT blob at +Q,
+    with optional visualization.
+
+    Parameters
+    ----------
+    data : (H, W) array
+        Real-space image.
+    Q : (qx, qy)
+        +Q peak position in FFT pixel coordinates (0-based).
+    radius : float
+        Mask radius in FFT pixels (sigma if method='gaussian').
+    method : 'gaussian' or 'disk'
+        Mask type.
+    shift_to_center : bool
+        If True, shift the +Q blob to DC before iFFT.
+    window, zeroDC, beta : passed to stmpy.tools.fft
+    show : bool
+        If True, show diagnostic plots.
+
+    Returns
+    -------
+    A : (H, W) array
+        CDW intensity (amplitude) map.
+    """
+
+    img = np.asarray(data)
+    if img.ndim != 2:
+        raise ValueError("data must be a 2D array")
+
+    H, W = img.shape
+    cx = (W - 1) / 2.0
+    cy = (H - 1) / 2.0
+    qx, qy = float(Q[0]), float(Q[1])
+
+    # -------------------------
+    # Build k-space mask
+    # -------------------------
+    xx = np.arange(W)[None, :]
+    yy = np.arange(H)[:, None]
+    r2 = (xx - qx)**2 + (yy - qy)**2
+
+    if method == "disk":
+        mask = (r2 <= radius**2).astype(float)
+    elif method == "gaussian":
+        sig2 = float(radius)**2
+        mask = np.exp(-r2 / (2.0 * sig2 + 1e-30))
+    else:
+        raise ValueError("method must be 'gaussian' or 'disk'")
+
+    # -------------------------
+    # FFT
+    # -------------------------
+    F = stmpy.tools.fft(
+        img,
+        window=window,
+        output="complex",
+        zeroDC=zeroDC,
+        beta=beta,
+        units="None"
+    )
+
+    # -------------------------
+    # Filter +Q blob
+    # -------------------------
+    Fq = F * mask
+
+    # -------------------------
+    # Shift blob to center
+    # -------------------------
+    if shift_to_center:
+        dx = int(np.rint(cx - qx))
+        dy = int(np.rint(cy - qy))
+        Fq = np.roll(np.roll(Fq, dy, axis=0), dx, axis=1)
+
+    # -------------------------
+    # iFFT → complex field
+    # -------------------------
+    psi = stmpy.tools.ifft(Fq, output="complex", envelope=False)
+
+    # -------------------------
+    # Intensity map
+    # -------------------------
+    if show_option == 'absolute':
+        A = np.abs(psi)
+    elif show_option == 'real':
+        A = np.real(psi)
+    elif show_option == 'imag':
+        A = np.imag(psi)
+    else:
+        raise ValueError("show_option must be 'absolute', 'real', or 'imag'")
+
+    # -------------------------
+    # Show diagnostics
+    # -------------------------
+    if show:
+        fig, ax = plt.subplots(2, 2, figsize=(8, 8))
+
+        # (1) Original image
+        
+        im0 = ax[0, 0].imshow(img, origin="lower", cmap=stmpy.cm.Blues_r)
+        ax[0, 0].set_title("Original")
+        ax[0, 0].set_xticks([]); ax[0, 0].set_yticks([])
+        plt.colorbar(im0, ax=ax[0, 0], fraction=0.046, pad=0.04)
+
+        # (2) FFT magnitude with circle
+        fft_mag = np.abs(F)
+        clim = _percent_clim(fft_mag)
+        im1 = ax[0, 1].imshow(fft_mag, origin="lower", cmap=stmpy.cm.gray_r, clim=clim)
+        circ = patches.Circle((qx, qy), radius,
+                               fill=False, ec="cyan", lw=1.5)
+        ax[0, 1].add_patch(circ)
+        ax[0, 1].set_title("FFT magnitude (+Q selected)")
+        ax[0, 1].set_xticks([]); ax[0, 1].set_yticks([])
+        plt.colorbar(im1, ax=ax[0, 1], fraction=0.046, pad=0.04)
+        if crop_n > 0:
+            ax[0, 1].set_xlim(cx - crop_n, cx + crop_n)
+            ax[0, 1].set_ylim(cy - crop_n, cy + crop_n)
+        # (3) Filtered FFT magnitude
+        fft_filt_mag = np.abs(Fq)
+        clim = _percent_clim(fft_filt_mag)
+        im2 = ax[1, 0].imshow(fft_filt_mag, origin="lower", cmap=stmpy.cm.gray_r, clim=clim)
+        ax[1, 0].set_title("Filtered FFT (after shift)" if shift_to_center
+                           else "Filtered FFT")
+        ax[1, 0].set_xticks([]); ax[1, 0].set_yticks([])
+        plt.colorbar(im2, ax=ax[1, 0], fraction=0.046, pad=0.04)
+        if crop_n > 0:
+            ax[1, 0].set_xlim(cx - crop_n, cx + crop_n)
+            ax[1, 0].set_ylim(cy - crop_n, cy + crop_n)
+        # (4) CDW intensity map
+        im3 = ax[1, 1].imshow(A, origin="lower", cmap=stmpy.cm.Blues_r)
+        ax[1, 1].set_title("CDW intensity |ψ(r)|")
+        ax[1, 1].set_xticks([]); ax[1, 1].set_yticks([])
+        plt.colorbar(im3, ax=ax[1, 1], fraction=0.046, pad=0.04)
+
+        plt.tight_layout()
+        plt.show()
+
+    return A
+
+
 def split_fourier_circles(data, points, radius, mirror=True,
                           method='disk', ifft_mode='real', envelope=False,
                           window='None', zeroDC=True, beta=1.0, 
@@ -3132,22 +3284,22 @@ def split_fourier_circles(data, points, radius, mirror=True,
         F_in = F * mask
         F_out = F * (1.0 - mask)
         
-        in_real = stmpy.tools.ifft(F_in, output=ifft_mode, envelope=envelope)
-        out_real = stmpy.tools.ifft(F_out, output=ifft_mode, envelope=envelope)
+        in_complex = stmpy.tools.ifft(F_in, output='complex', envelope=envelope)
+        out_complex = stmpy.tools.ifft(F_out, output='complex', envelope=envelope)
 
-        return in_real, out_real, F_in, F_out
+        return in_complex, out_complex, F_in, F_out
 
     # ---------------------------
     # Compute split (2D / 3D)
     # ---------------------------
     if len(data.shape) == 2:
-        in_real, out_real, F_in, F_out = _split_layer(data)
+        in_complex, out_complex, F_in, F_out = _split_layer(data)
         F_for_show = stmpy.tools.fft(data, window=window, output='complex',
                                      zeroDC=zeroDC, beta=beta, units='None')
     else:
         N = data.shape[0]
-        in_real = np.zeros_like(data, dtype=float)
-        out_real = np.zeros_like(data, dtype=float)
+        in_complex = np.zeros_like(data, dtype=complex)
+        out_complex = np.zeros_like(data, dtype=complex)
 
         if return_fft:
             F_in_all = np.zeros_like(data, dtype=np.complex128)
@@ -3155,8 +3307,8 @@ def split_fourier_circles(data, points, radius, mirror=True,
 
         for ix, layer in enumerate(data):
             rin, rout, Fin, Fout = _split_layer(layer)
-            in_real[ix] = rin
-            out_real[ix] = rout
+            in_complex[ix] = rin
+            out_complex[ix] = rout
             if return_fft:
                 F_in_all[ix] = Fin
                 F_out_all[ix] = Fout
@@ -3179,8 +3331,8 @@ def split_fourier_circles(data, points, radius, mirror=True,
         # data to show in real space
         if len(data.shape) == 2:
             real_show = data
-            in_show = in_real
-            out_show = out_real
+            in_show = stmpy.tools.ifft(F_in, output=ifft_mode, envelope=envelope)
+            out_show = stmpy.tools.ifft(F_out, output=ifft_mode, envelope=envelope)
         else:
             real_show = np.mean(data, axis=0)
             in_show = stmpy.tools.ifft(F_in, output=ifft_mode, envelope=envelope)
@@ -3268,7 +3420,7 @@ def split_fourier_circles(data, points, radius, mirror=True,
     # Return outputs
     # ---------------------------
     if len(data.shape) == 2:
-        outs = [in_real, out_real]
+        outs = [in_complex, out_complex]
         if return_fft:
             outs += [F_in, F_out]
         if return_mask:
@@ -3276,7 +3428,7 @@ def split_fourier_circles(data, points, radius, mirror=True,
         return tuple(outs)
 
     else:
-        outs = [in_real, out_real]
+        outs = [in_complex, out_complex]
         if return_fft:
             outs += [F_in_all, F_out_all]
         if return_mask:
