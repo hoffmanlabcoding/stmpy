@@ -3034,14 +3034,12 @@ def fourier_filter(data, freq, sigma, method='disk', envelope=False):
 
 
 
-import numpy as np
-import stmpy
-
 def split_fourier_circles(data, points, radius, mirror=True,
-                          method='disk', envelope=False,
-                          window='None', zeroDC=True, beta=1.0,
+                          method='disk', ifft_mode='real', envelope=False,
+                          window='None', zeroDC=True, beta=1.0, 
+                          crop_n=0, r=None,
                           return_fft=False, return_mask=False,
-                          show=False, show_clim_sigma=3, show_cmap=None,
+                          show=False,
                           show_fft_output='absolute'):
     '''
     Split Fourier space into (inside circles) and (outside circles) around
@@ -3063,7 +3061,7 @@ def split_fourier_circles(data, points, radius, mirror=True,
         mirror  - Optional : If True, also include conjugate-symmetric partner
                              points about the FFT center (recommended).
         method  - Optional : 'disk' (binary) or 'gaussian' (soft mask).
-        envelope- Optional : Passed to stmpy.tools.ifft (Hilbert envelope).
+        ifft_mode- Optional : Passed to stmpy.tools.ifft (output mode: 'real', 'absolute', etc.).
         window  - Optional : Window passed to stmpy.tools.fft (default 'None').
         zeroDC  - Optional : Bool passed to stmpy.tools.fft (default True).
         beta    - Optional : Kaiser beta if window='kaiser'.
@@ -3095,13 +3093,13 @@ def split_fourier_circles(data, points, radius, mirror=True,
     H = data.shape[-2]
     W = data.shape[-1]
 
-    # fftshift center in 1..W / 1..H convention
-    cx = (W + 1) / 2.0
-    cy = (H + 1) / 2.0
+    # fftshift center in 0..W-1 / 0..H-1 convention
+    cx = (W - 1) / 2.0
+    cy = (H - 1) / 2.0
 
-    # build mask grid (x: 1..W, y: 1..H)
-    x = np.linspace(1, W, W)[None, :]
-    y = np.linspace(1, H, H)[:, None]
+    # build mask grid (x: 0..W-1, y: 0..H-1)
+    x = np.linspace(0, W-1, W)[None, :]
+    y = np.linspace(0, H-1, H)[:, None]
 
     # include mirror (conjugate) points about FFT center
     if mirror:
@@ -3133,13 +3131,9 @@ def split_fourier_circles(data, points, radius, mirror=True,
                             zeroDC=zeroDC, beta=beta, units='None')
         F_in = F * mask
         F_out = F * (1.0 - mask)
-
-        if envelope:
-            in_real = stmpy.tools.ifft(F_in, output='absolute', envelope=True)
-            out_real = stmpy.tools.ifft(F_out, output='absolute', envelope=True)
-        else:
-            in_real = stmpy.tools.ifft(F_in, output='real', envelope=False)
-            out_real = stmpy.tools.ifft(F_out, output='real', envelope=False)
+        
+        in_real = stmpy.tools.ifft(F_in, output=ifft_mode, envelope=envelope)
+        out_real = stmpy.tools.ifft(F_out, output=ifft_mode, envelope=envelope)
 
         return in_real, out_real, F_in, F_out
 
@@ -3181,20 +3175,6 @@ def split_fourier_circles(data, points, radius, mirror=True,
         import matplotlib.pyplot as plt
         import matplotlib.patches as patches
 
-        # choose display cmap
-        if show_cmap is None:
-            try:
-                show_cmap = stmpy.cm.gray_r
-            except Exception:
-                show_cmap = "gray"
-
-        def _sigma_clim(img, ns=3):
-            v = img[np.isfinite(img)]
-            if v.size == 0:
-                return None
-            mu = np.mean(v)
-            sd = np.std(v)
-            return [mu - ns * sd, mu + ns * sd]
 
         # data to show in real space
         if len(data.shape) == 2:
@@ -3203,9 +3183,8 @@ def split_fourier_circles(data, points, radius, mirror=True,
             out_show = out_real
         else:
             real_show = np.mean(data, axis=0)
-            in_show = stmpy.tools.ifft(F_in, output='real', envelope=False) if not envelope else stmpy.tools.ifft(F_in, output='absolute', envelope=True)
-            out_show = stmpy.tools.ifft(F_out, output='real', envelope=False) if not envelope else stmpy.tools.ifft(F_out, output='absolute', envelope=True)
-
+            in_show = stmpy.tools.ifft(F_in, output=ifft_mode, envelope=envelope)
+            out_show = stmpy.tools.ifft(F_out, output=ifft_mode, envelope=envelope)
         # FFT to show (select output type)
         if show_fft_output == 'absolute':
             fft_show = np.abs(F_for_show)
@@ -3219,20 +3198,32 @@ def split_fourier_circles(data, points, radius, mirror=True,
             fft_show = np.abs(F_for_show)
         else:
             raise ValueError("show_fft_output must be 'absolute','real','imag','phase','complex'")
+        
+        *_, Y, X = np.shape(fft_show)        
+        if r is not None:
+            Lx = X * r
+            Ly = Y * r
+            x = np.arange(X)
+            y = np.arange(Y)
+            p0 = [int(X/2), int(Y/2), Lx, Ly, 1, np.pi/2]
+            G = 1-stmpy.tools.gauss2d(x, y, p=p0)
+        else:
+            G = 1
+        fft_show = fft_show * G
 
         fig, ax = plt.subplots(2, 2, figsize=(8, 8))
 
         # (1) original
-        clim = _sigma_clim(real_show, show_clim_sigma)
-        im0 = ax[0, 0].imshow(real_show, cmap=show_cmap, origin='lower',
+        clim = _percent_clim(real_show)
+        im0 = ax[0, 0].imshow(real_show, cmap=stmpy.cm.Blues_r, origin='lower',
                               clim=clim if clim is not None else None)
         ax[0, 0].set_title('Original (mean if 3D)')
         ax[0, 0].set_xticks([]); ax[0, 0].set_yticks([])
         plt.colorbar(im0, ax=ax[0, 0], fraction=0.046, pad=0.04)
 
         # (2) FFT with circles + mask overlay
-        clim = _sigma_clim(fft_show, show_clim_sigma)
-        im1 = ax[0, 1].imshow(fft_show, cmap=show_cmap, origin='lower',
+        clim = _percent_clim(fft_show)
+        im1 = ax[0, 1].imshow(fft_show, cmap=stmpy.cm.gray_r, origin='lower',
                               clim=clim if clim is not None else None)
         ax[0, 1].set_title('FFT (mask & circles)')
         ax[0, 1].set_xticks([]); ax[0, 1].set_yticks([])
@@ -3240,24 +3231,31 @@ def split_fourier_circles(data, points, radius, mirror=True,
         ax[0, 1].imshow(mask, cmap='Reds', origin='lower', alpha=0.25)
 
         # draw circles (convert 1..W/1..H -> imshow coords 0..W-1/0..H-1)
-        for (px, py) in pts_all:
+        for (px, py) in pts:
             circ = patches.Circle((px - 1.0, py - 1.0), radius,
                                   fill=False, ec='cyan', lw=1.2)
             ax[0, 1].add_patch(circ)
-
+        if mirror:
+            for (px, py) in pts_m:
+                circ = patches.Circle((px - 1.0, py - 1.0), radius,
+                                  fill=False, ec='red', lw=1.2)
+                ax[0, 1].add_patch(circ)
         plt.colorbar(im1, ax=ax[0, 1], fraction=0.046, pad=0.04)
+        if crop_n > 0:
+            ax[0,1].set_xlim((cx - crop_n - 1, cx + crop_n - 1))
+            ax[0,1].set_ylim((cy - crop_n - 1, cy + crop_n - 1))
 
         # (3) iFFT inside
-        clim = _sigma_clim(in_show, show_clim_sigma)
-        im2 = ax[1, 0].imshow(in_show, cmap=show_cmap, origin='lower',
+        clim = _percent_clim(in_show)
+        im2 = ax[1, 0].imshow(in_show, cmap=stmpy.cm.Blues_r, origin='lower',
                               clim=clim if clim is not None else None)
         ax[1, 0].set_title('iFFT: inside circles')
         ax[1, 0].set_xticks([]); ax[1, 0].set_yticks([])
         plt.colorbar(im2, ax=ax[1, 0], fraction=0.046, pad=0.04)
 
         # (4) iFFT outside
-        clim = _sigma_clim(out_show, show_clim_sigma)
-        im3 = ax[1, 1].imshow(out_show, cmap=show_cmap, origin='lower',
+        clim = _percent_clim(out_show)
+        im3 = ax[1, 1].imshow(out_show, cmap=stmpy.cm.Blues_r, origin='lower',
                               clim=clim if clim is not None else None)
         ax[1, 1].set_title('iFFT: outside circles')
         ax[1, 1].set_xticks([]); ax[1, 1].set_yticks([])
@@ -3284,3 +3282,453 @@ def split_fourier_circles(data, points, radius, mirror=True,
         if return_mask:
             outs += [mask]
         return tuple(outs)
+    
+
+
+def radial_annulus_bandpass(data, r_in, r_out,
+                            method='annulus', edge_sigma=None,
+                            envelope=False, sym=None,
+                            window='None', zeroDC=True, beta=1.0, crop_n=0, 
+                            return_fft=False, return_mask=False,
+                            show=False, 
+                            show_fft_output='absolute'):
+    """
+    Radial annular band-pass filter centered at the FFT origin (DC), i.e. the FFT center.
+
+    Keeps Fourier components with radius r_in <= r <= r_out from the FFT center.
+    """
+
+    data = np.asarray(data)
+    if data.ndim not in (2, 3):
+        raise ValueError("data must be 2D or 3D numpy array.")
+    if not (0 <= float(r_in) < float(r_out)):
+        raise ValueError("Require 0 <= r_in < r_out.")
+
+    H = data.shape[-2]
+    W = data.shape[-1]
+
+    # stmpy convention: x in [1..W], y in [1..H], center at (W+1)/2, (H+1)/2
+    cx = (W + 1) / 2.0
+    cy = (H + 1) / 2.0
+
+    x = np.linspace(1, W, W)[None, :]
+    y = np.linspace(1, H, H)[:, None]
+    r = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+
+    if method == 'annulus':
+        mask = ((r >= r_in) & (r <= r_out)).astype(float)
+
+    elif method == 'gaussian':
+        # soft edges on r_in and r_out (no scipy): tanh-based smooth steps
+        if edge_sigma is None:
+            edge_sigma = max((r_out - r_in) / 6.0, 1e-6)
+        s = float(edge_sigma)
+
+        def smooth_step(z):
+            return 0.5 * (1.0 + np.tanh(z / (s + 1e-30)))
+
+        mask = smooth_step(r - r_in) * smooth_step(r_out - r)
+    else:
+        raise ValueError('method must be "annulus" or "gaussian"')
+
+    def _filter_layer(layer):
+        F = stmpy.tools.fft(layer, window=window, output='complex',
+                            zeroDC=zeroDC, beta=beta, units='None')
+        F_pass = F * mask
+        F_stop = F * (1.0 - mask)
+
+        if envelope:
+            pass_real = stmpy.tools.ifft(F_pass, output='absolute', envelope=True)
+            stop_real = stmpy.tools.ifft(F_stop, output='absolute', envelope=True)
+        else:
+            pass_real = stmpy.tools.ifft(F_pass, output='real', envelope=False)
+            stop_real = stmpy.tools.ifft(F_stop, output='real', envelope=False)
+
+        return pass_real, stop_real, F_pass, F_stop, F
+
+    if data.ndim == 2:
+        pass_real, stop_real, F_pass, F_stop, F_for_show = _filter_layer(data)
+        F_pass_all = F_stop_all = None
+    else:
+        N = data.shape[0]
+        pass_real = np.zeros_like(data, dtype=float)
+        stop_real = np.zeros_like(data, dtype=float)
+
+        if return_fft:
+            F_pass_all = np.zeros_like(data, dtype=np.complex128)
+            F_stop_all = np.zeros_like(data, dtype=np.complex128)
+
+        for i, layer in enumerate(data):
+            pr, sr, Fp, Fs, _ = _filter_layer(layer)
+            pass_real[i] = pr
+            stop_real[i] = sr
+            if return_fft:
+                F_pass_all[i] = Fp
+                F_stop_all[i] = Fs
+
+        mean_layer = np.mean(data, axis=0)
+        __pr, __sr, __Fp, __Fs, F_for_show = _filter_layer(mean_layer)
+        F_pass, F_stop = __Fp, __Fs
+
+    if show:
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+
+        if data.ndim == 2:
+            real_show = data
+            pass_show = pass_real
+            stop_show = stop_real
+        else:
+            real_show = np.mean(data, axis=0)
+            pass_show = stmpy.tools.ifft(F_pass, output='real', envelope=False) if not envelope else \
+                        stmpy.tools.ifft(F_pass, output='absolute', envelope=True)
+            stop_show = stmpy.tools.ifft(F_stop, output='real', envelope=False) if not envelope else \
+                        stmpy.tools.ifft(F_stop, output='absolute', envelope=True)
+
+        if show_fft_output == 'absolute':
+            fft_show = np.abs(F_for_show)
+        elif show_fft_output == 'real':
+            fft_show = np.real(F_for_show)
+        elif show_fft_output == 'imag':
+            fft_show = np.imag(F_for_show)
+        elif show_fft_output == 'phase':
+            fft_show = np.angle(F_for_show)
+        else:
+            raise ValueError("show_fft_output must be 'absolute','real','imag','phase'")
+
+        *_, Y, X = np.shape(fft_show)
+        
+        # if r is not None:
+        #     Lx = X * r
+        #     Ly = Y * r
+        #     x = np.arange(X)
+        #     y = np.arange(Y)
+        #     p0 = [int(X/2), int(Y/2), Lx, Ly, 1, np.pi/2]
+        #     G = 1-stmpy.tools.gauss2d(x, y, p=p0)
+        # else:
+        #     G = 1
+        # fft_show = fft_show * G
+        fig, ax = plt.subplots(2, 2, figsize=(8, 8))
+
+        clim = _percent_clim(real_show)
+        im0 = ax[0, 0].imshow(real_show, cmap=stmpy.cm.Blues_r, origin='lower',
+                              clim=clim if clim is not None else None)
+        ax[0, 0].set_title('Original (mean if 3D)')
+        ax[0, 0].set_xticks([]); ax[0, 0].set_yticks([])
+        plt.colorbar(im0, ax=ax[0, 0], fraction=0.046, pad=0.04)
+
+        clim = _percent_clim(fft_show)
+        im1 = ax[0, 1].imshow(fft_show, cmap=stmpy.cm.gray_r, origin='lower',
+                              clim=clim if clim is not None else None)
+        ax[0, 1].set_title('FFT (radial annulus)')
+        ax[0, 1].set_xticks([]); ax[0, 1].set_yticks([])
+        ax[0, 1].imshow(mask, cmap='Reds', origin='lower', alpha=0.25)
+
+        # draw r_in / r_out circles around the FFT center
+        ax[0, 1].add_patch(patches.Circle((cx - 1.0, cy - 1.0), r_out,
+                                          fill=False, ec='cyan', lw=1.2))
+        ax[0, 1].add_patch(patches.Circle((cx - 1.0, cy - 1.0), r_in,
+                                          fill=False, ec='cyan', lw=1.2, ls='--'))
+        plt.colorbar(im1, ax=ax[0, 1], fraction=0.046, pad=0.04)
+        if crop_n > 0:
+            ax[0, 1].set_xlim(cx - crop_n - 1, cx + crop_n - 1)
+            ax[0, 1].set_ylim(cy - crop_n - 1, cy + crop_n - 1)
+
+        clim = _percent_clim(pass_show)
+        im2 = ax[1, 0].imshow(pass_show, cmap=stmpy.cm.Blues_r, origin='lower',
+                              clim=clim if clim is not None else None)
+        ax[1, 0].set_title('iFFT: band-pass (radial annulus)')
+        ax[1, 0].set_xticks([]); ax[1, 0].set_yticks([])
+        plt.colorbar(im2, ax=ax[1, 0], fraction=0.046, pad=0.04)
+
+        clim = _percent_clim(stop_show)
+        im3 = ax[1, 1].imshow(stop_show, cmap=stmpy.cm.Blues_r, origin='lower',
+                              clim=clim if clim is not None else None)
+        ax[1, 1].set_title('iFFT: residual (stop-band)')
+        ax[1, 1].set_xticks([]); ax[1, 1].set_yticks([])
+        plt.colorbar(im3, ax=ax[1, 1], fraction=0.046, pad=0.04)
+
+        plt.tight_layout()
+        plt.show()
+
+    outs = [pass_real, stop_real]
+    if return_fft:
+        outs += ([F_pass, F_stop] if data.ndim == 2 else [F_pass_all, F_stop_all])
+    if return_mask:
+        outs += [mask]
+    return tuple(outs)
+
+def _percent_clim(img):
+    v = img[np.isfinite(img)]
+    if v.size == 0:
+        return None
+    # return percentile-based clim
+    return [np.percentile(v, 1), np.percentile(v, 99)]
+
+
+import numpy as np
+
+def fit_fft_center_plus_hex6(
+    fft_img,
+    angle_deg,
+    R0,
+    crop_halfwidth=None,
+    center_guess=None,
+    fit_center=True,
+    fit_radius=True,
+    fit_angle=False,          # if True, fit phi; if False, phi fixed to angle_deg
+    use_abs=True,             # if fft_img is complex, fit |fft_img|
+    weights=None,             # optional same-shape weights
+):
+    """
+    Fit a 2D FFT image with:
+      I(x,y) = B
+             + G0: A0 * exp(-((x-cx)^2+(y-cy)^2)/(2*s0^2))
+             + sum_{k=0..5} G6: A6 * exp(-((x-xk)^2+(y-yk)^2)/(2*s6^2))
+
+    where (xk, yk) form a perfect hexagon:
+      xk = cx + R*cos(phi + k*pi/3)
+      yk = cy + R*sin(phi + k*pi/3)
+
+    All 6 ring Gaussians share the same (A6, s6) => same area.
+    Central Gaussian is circular with (A0, s0).
+
+    Returns dict with fitted params + fit images.
+    """
+
+    try:
+        from scipy.optimize import least_squares
+    except Exception as e:
+        raise ImportError("This function requires SciPy: scipy.optimize.least_squares") from e
+
+    img = np.asarray(fft_img)
+    if img.ndim != 2:
+        raise ValueError("fft_img must be 2D.")
+
+    if np.iscomplexobj(img) and use_abs:
+        img = np.abs(img)
+    else:
+        img = np.real(img)
+
+    H, W = img.shape
+
+    # center guess (x=col, y=row) in 0-based coordinates
+    if center_guess is None:
+        cx0 = (W - 1) / 2.0
+        cy0 = (H - 1) / 2.0
+    else:
+        cx0, cy0 = map(float, center_guess)
+
+    # crop for fitting
+    if crop_halfwidth is not None:
+        h = int(crop_halfwidth)
+        x0 = max(0, int(round(cx0)) - h)
+        x1 = min(W, int(round(cx0)) + h + 1)
+        y0 = max(0, int(round(cy0)) - h)
+        y1 = min(H, int(round(cy0)) + h + 1)
+        img_fit = img[y0:y1, x0:x1]
+        yy, xx = np.mgrid[y0:y1, x0:x1]   # in full-image coords
+    else:
+        img_fit = img
+        yy, xx = np.mgrid[0:H, 0:W]
+
+    # weights
+    if weights is not None:
+        w = np.asarray(weights)
+        if w.shape != img.shape:
+            raise ValueError("weights must have same shape as fft_img.")
+        if crop_halfwidth is not None:
+            w_fit = w[y0:y1, x0:x1]
+        else:
+            w_fit = w
+        w_fit = np.sqrt(np.maximum(w_fit, 0.0))
+    else:
+        w_fit = None
+
+    # fixed or fitted angle
+    phi_fixed = np.deg2rad(float(angle_deg))
+
+    def gauss2d_iso(A, x0, y0, s):
+        # isotropic 2D gaussian
+        return A * np.exp(-((xx - x0) ** 2 + (yy - y0) ** 2) / (2.0 * s * s + 1e-30))
+
+    def make_model(params):
+        # params layout depends on fit_angle
+        if fit_angle:
+            A0, s0, A6, s6, B, cx, cy, R, phi = params
+        else:
+            A0, s0, A6, s6, B, cx, cy, R = params
+            phi = phi_fixed
+
+        out = np.zeros_like(img_fit, dtype=float)
+        out += B
+        out += gauss2d_iso(A0, cx, cy, s0)
+
+        for k in range(6):
+            ang = phi + k * (np.pi / 3.0)
+            xk = cx + R * np.cos(ang)
+            yk = cy + R * np.sin(ang)
+            out += gauss2d_iso(A6, xk, yk, s6)
+
+        return out
+
+    # --- initial guesses ---
+    med = float(np.median(img_fit))
+    mx = float(np.max(img_fit))
+    A0_0 = max(mx - med, 1e-6)
+    A6_0 = 0.5 * A0_0
+    s0_0 = max(2.0, 0.02 * min(H, W))
+    s6_0 = max(2.0, 0.015 * min(H, W))
+    B_0  = med
+    R_0  = float(R0)
+
+    # parameter vector
+    if fit_angle:
+        p0 = np.array([A0_0, s0_0, A6_0, s6_0, B_0, cx0, cy0, R_0, phi_fixed], float)
+    else:
+        p0 = np.array([A0_0, s0_0, A6_0, s6_0, B_0, cx0, cy0, R_0], float)
+
+    # --- bounds (lo < hi always) ---
+    # amplitudes >=0, sigmas >0, R>=0; cx,cy within image
+    if fit_angle:
+        lo = np.array([0.0, 0.5, 0.0, 0.5, -np.inf, 0.0, 0.0, 0.0, -np.inf], float)
+        hi = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, W-1.0, H-1.0, np.inf, np.inf], float)
+    else:
+        lo = np.array([0.0, 0.5, 0.0, 0.5, -np.inf, 0.0, 0.0, 0.0], float)
+        hi = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, W-1.0, H-1.0, np.inf], float)
+
+    # optionally fix center / radius by making their bounds very tight (epsilon), but keep lo<hi
+    eps = 1e-9
+
+    def tighten(idx, val):
+        lo[idx] = val - eps
+        hi[idx] = val + eps
+        p0[idx] = val
+
+    # indices for the chosen layout
+    # [A0, s0, A6, s6, B, cx, cy, R, (phi)]
+    IDX_CX = 5
+    IDX_CY = 6
+    IDX_R  = 7
+
+    if not fit_center:
+        tighten(IDX_CX, cx0)
+        tighten(IDX_CY, cy0)
+
+    if not fit_radius:
+        tighten(IDX_R, R_0)
+
+    # residual
+    ydata = img_fit.ravel()
+
+    def resid(p):
+        m = make_model(p).ravel()
+        r = (m - ydata)
+        if w_fit is not None:
+            r = r * w_fit.ravel()
+        return r
+
+    res = least_squares(resid, p0, bounds=(lo, hi), method="trf")
+    p = res.x
+
+    # unpack fitted params
+    if fit_angle:
+        A0, s0, A6, s6, B, cx, cy, R, phi = p
+    else:
+        A0, s0, A6, s6, B, cx, cy, R = p
+        phi = phi_fixed
+
+    ring_centers = []
+    for k in range(6):
+        ang = phi + k * (np.pi / 3.0)
+        ring_centers.append((cx + R*np.cos(ang), cy + R*np.sin(ang)))
+
+    fit_img = make_model(p)
+    resid_img = fit_img - img_fit
+    out = {
+        "success": bool(res.success),
+        "message": res.message,
+        "cost": float(res.cost),
+        "params": {"A0": A0, "s0": s0, "A6": A6, "s6": s6, "B": B, "cx": cx, "cy": cy, "R": R, "phi": phi},
+        "ring_centers_xy": ring_centers,   # (x,y) in full-image coordinates
+        "fit_region": None if crop_halfwidth is None else {"x0": x0, "x1": x1, "y0": y0, "y1": y1},
+        "data_image": img_fit,
+        "fit_image": fit_img,
+        "residual_image": resid_img,
+        "scipy_result": res,
+    }
+    plot_fft_with_hex_fit(fft_img, out, show_indices=True)
+    return out
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_fft_with_hex_fit(fft_img, fit_out,
+                          use_abs=True,
+                          origin="lower",
+                          show_colorbar=True,
+                          draw_center=True,
+                          draw_ring=True,
+                          ring_style=dict(linewidth=1.5),
+                          center_style=dict(color="cyan", s=30),
+                          ring_center_style=dict(color="cyan", s=20),
+                          show_indices=False):
+    """
+    Plot FFT (or FFT magnitude) and overlay fitted center + 6 hexagon peak centers.
+
+    Parameters
+    ----------
+    fft_img : 2D array (real or complex)
+    fit_out : dict
+        Output from fit_fft_center_plus_hex6()
+    clim_sigma : float
+        Sigma clipping for display limits.
+    show_indices : bool
+        If True, annotate k=0..5 next to ring peaks.
+    """
+
+    img = np.asarray(fft_img)
+    if np.iscomplexobj(img) and use_abs:
+        img = np.abs(img)
+    else:
+        img = np.real(img)
+
+    vmin, vmax = _percent_clim(img)
+    cx = fit_out["params"]["cx"]
+    cy = fit_out["params"]["cy"]
+    ring_centers = fit_out["ring_centers_xy"]
+
+    fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+    im = ax.imshow(img, cmap=stmpy.cm.gray_r, origin=origin,
+                   vmin=vmin if vmin is not None else None,
+                   vmax=vmax if vmax is not None else None)
+
+    ax.set_title("FFT with fitted hexagon peaks")
+    ax.set_xticks([]); ax.set_yticks([])
+
+    if show_colorbar:
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    # draw fitted center
+    if draw_center:
+        ax.scatter([cx], [cy], **center_style)
+
+    # draw 6 fitted ring peak centers
+    if draw_ring and ring_centers is not None:
+        xs = [p[0] for p in ring_centers]
+        ys = [p[1] for p in ring_centers]
+        ax.scatter(xs, ys, **ring_center_style)
+
+        # draw the hexagon edges (connect peaks)
+        xs_poly = xs + [xs[0]]
+        ys_poly = ys + [ys[0]]
+        ax.plot(xs_poly, ys_poly, **ring_style)
+
+        if show_indices:
+            for k, (xk, yk) in enumerate(ring_centers):
+                ax.text(xk + 2, yk + 2, str(k), color=ring_center_style.get("color", "cyan"),
+                        fontsize=10, weight="bold")
+
+    plt.tight_layout()
+    plt.show()

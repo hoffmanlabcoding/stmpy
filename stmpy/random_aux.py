@@ -110,15 +110,17 @@ def _process_pipeline_LIY(data,smooth_window=10, window_type='hanning'):
     data.LIY_smoothed = smooth_LIY(data.LIY, window=smooth_window, axis=0, mode='reflect')
     data.LIY_gc = stmpy.tools.nsigma_global(data.LIY_smoothed, n=3, M=3, repeat=2)
     data.LIY_lc = stmpy.tools.nsigma_local(data.LIY_gc, n=3, N=4, M=3, repeat=2)
+    data.I_smoothed = smooth_LIY(data.I, window=smooth_window, axis=0, mode='reflect')
+    data.Feenstra = data.LIY / data.I * data.en[:, None, None]
+    data.Feenstra_smoothed = data.LIY_smoothed / data.I_smoothed * data.en[:, None, None]
 
     data.FLIY = stmpy.tools.fft(data.LIY, zeroDC=True, window=window_type, units='amplitude', output='absolute')
     data.FLIY_gc = stmpy.tools.fft(data.LIY_gc, zeroDC=True, window=window_type, units='amplitude', output='absolute')
     data.FLIY_lc = stmpy.tools.fft(data.LIY_lc, zeroDC=True, window=window_type, units='amplitude', output='absolute')
     data.FLIY_smoothed = stmpy.tools.fft(data.LIY_smoothed, zeroDC=True, window=window_type, units='amplitude', output='absolute')
     data.Fdidv = stmpy.tools.fft(data.didv, zeroDC=True, window=window_type, units='amplitude', output='absolute')
-
-
-
+    data.FI_smoothed = stmpy.tools.fft(data.I_smoothed, zeroDC=True, window=window_type, units='amplitude', output='absolute')
+    
 def normalize_LIY_by_area(en, LIY, E1, E2, eps=1e-24, window_type='hanning',return_area=True):
     en = np.asarray(en)
     LIY = np.asarray(LIY)
@@ -163,6 +165,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                              colorbar_range=None,
                              colorbar_range_ps=None,
                              add_label=True,
+                             sym=None,
                              savepath=None, savename=None, make_plots=True, show=True, return_figs=False, silent=True, RHK_format=True):
 
     scan_size = data.scan_info['scan_size']  # in nm
@@ -184,7 +187,12 @@ def add_corrections_and_plot(data, dos_map: bool = False,
         data.Z_BWD_gc, data.Z_BWD_lc, data.Z_BWD_ls, data.FZ_BWD_ls, data.Z_BWD_ps, data.FZ_BWD_ps = _process_pipeline(data.Z_BWD)
         data.FZ_BWD_ls = stmpy.tools.fft(data.Z_BWD_ls, zeroDC=True, window='hanning', units='amplitude', output='absolute')
         if make_plots:
-            fig_topo, ax_topo = plt.subplots(2, 7, figsize=(23, 10))
+            if sym is not None:
+                fig_topo, ax_topo = plt.subplots(2, 8, figsize=(26, 10), constrained_layout=True)
+                data.FZ_ls_s = dfc.sym(data.FZ_ls, sym)
+                data.FZ_BWD_ls_s = dfc.sym(data.FZ_BWD_ls, sym)
+            else:
+                fig_topo, ax_topo = plt.subplots(2, 7, figsize=(23, 10))
             ax_topo[0,0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,0].set_title('Raw Z')
             ax_topo[0,1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,1].set_title('Global Corrected Z')
             ax_topo[0,2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,2].set_title('Local Corrected Z')
@@ -225,6 +233,10 @@ def add_corrections_and_plot(data, dos_map: bool = False,
             plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[0,6], add_colorbar=add_colorbar)
             plot_FFT_data(data.FZ_BWD_ls, k_crop_n=k_crop_n, ax=ax_topo[1,5], add_colorbar=add_colorbar)
             plot_FFT_data(data.FZ_BWD_ls, k_crop_n=0, ax=ax_topo[1,6], add_colorbar=add_colorbar)
+            if sym is not None:
+                plot_FFT_data(data.FZ_ls_s, k_crop_n=k_crop_n, ax=ax_topo[0,7], add_colorbar=add_colorbar)
+                plot_FFT_data(data.FZ_BWD_ls_s, k_crop_n=k_crop_n, ax=ax_topo[1,7], add_colorbar=add_colorbar)
+            
     else:
         if make_plots:
             fig_topo, ax_topo = plt.subplots(1, 7, figsize=(23, 5))
@@ -1093,6 +1105,8 @@ def cross_correlation_2d_plot(
     order=1,                  # interpolation order
     preserve_range=True,
     anti_aliasing=True,
+    xlim=None,
+    ylim=None,
 ):
     A = np.asarray(A, float)
     B = np.asarray(B, float)
@@ -1184,10 +1198,12 @@ def cross_correlation_2d_plot(
 
         im0 = axs[0].imshow(A, origin="lower", cmap=stmpy.cm.Blues_r, interpolation='none')
         axs[0].set_title(f"{titleA} ({'high-res' if high_res_label=='A' else 'resampled'})")
+
         plt.colorbar(im0, ax=axs[0], fraction=0.046, pad=0.04)
 
         im1 = axs[1].imshow(B, origin="lower", cmap=stmpy.cm.Blues_r, interpolation='none')
         axs[1].set_title(f"{titleB} ({'high-res' if high_res_label=='B' else 'resampled'})")
+
         plt.colorbar(im1, ax=axs[1], fraction=0.046, pad=0.04)
 
         vmax = np.nanmax(np.abs(C))
@@ -1204,6 +1220,10 @@ def cross_correlation_2d_plot(
         axs[2].set_title(f"peak={peak_value:.3f}, center={central_value:.3f}\n")
         axs[2].set_xlabel("dx (pixels)")
         axs[2].set_ylabel("dy (pixels)")
+        if xlim is not None:
+            axs[2].set_xlim(xlim)
+        if ylim is not None:
+            axs[2].set_ylim(ylim)
         plt.colorbar(im2, ax=axs[2], fraction=0.046, pad=0.04)
 
         plt.show()

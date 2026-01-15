@@ -2419,3 +2419,104 @@ def quick_plot(A, rspace=True, thres=3, fs=4, qscale=None, qlimit=1.2,  clims=No
             plt.savefig("{}.{}".format(imgName, extension), dpi=dpi, bbox_inches='tight', pad_inches=0)
         else:
             plt.savefig("{}.{}".format(imgName, extension), bbox_inches='tight', pad_inches=0)
+
+def hexfit(center, points, angle_offset=0):
+    """
+    Fits 6 given points to an ideal regular hexagon centered at 'center'.
+    Estimates the orientation angle from the input points.
+
+    Parameters:
+    - center: array-like, shape (2,), (x, y) center of the hexagon.
+    - points: array-like, shape (6, 2), six (x, y) coordinates.
+
+    Returns:
+    - fitted_hex: ndarray of shape (6, 2), ideal hexagon vertices.
+    """
+    center = np.asarray(center)
+    points = np.asarray(points)
+
+    if points.shape != (6, 2):
+        raise ValueError("Input 'points' must have shape (6, 2)")
+
+    # Compute vectors from center to each point
+    vecs = points - center
+
+    # Compute angles and radii
+    angles = np.arctan2(vecs[:, 1], vecs[:, 0])
+    radii = np.linalg.norm(vecs, axis=1)
+    avg_radius = np.mean(radii)
+
+    # Sort angles and find base angle (rotation)
+    angles = np.mod(angles, 2*np.pi)
+    angles_sorted = np.sort(angles)
+    
+    # Estimate starting angle by matching to ideal hexagon spacing (60° = π/3)
+    best_start_angle = None
+    min_error = np.inf
+
+    for i in range(6):
+        base_angle = angles_sorted[i]
+        ideal_angles = np.mod(base_angle + np.arange(6) * np.pi / 3, 2*np.pi)
+        error = np.sum(np.min(np.abs(angles[:, None] - ideal_angles[None, :]), axis=1))
+        if error < min_error:
+            min_error = error
+            best_start_angle = base_angle
+
+    # Generate fitted hexagon
+    hex_angles = best_start_angle + np.arange(6) * np.pi / 3
+    fitted_hex = np.stack([
+        center[0] + avg_radius * np.cos(hex_angles+ angle_offset),
+        center[1] + avg_radius * np.sin(hex_angles+ angle_offset)
+    ], axis=1)
+
+    return fitted_hex
+
+
+def sym(data, symmetry="C6"):
+    """
+    Symmetrize 2D or 3D data using rotational and/or reflection symmetry.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        2D or 3D array (e.g. FFT amplitude of EFM/STM data).
+    symmetry : str
+        Type of symmetry to apply. Options: 
+        - "C3mxy": Average mirror symmetry over x and y axes. Reflection + 120° and -120° rotation (threefold symmetry).
+        - 'C6': Reflection + 60°, 120°, 180°, -60°, -120° rotation (sixfold symmetry).
+
+    Returns
+    -------
+    out : np.ndarray
+        Symmetrized data array of the same shape as input.
+    """
+    def apply_symmetry_2d(img):
+    
+        if symmetry == "C3mxy":
+            r0 = (img + img[::-1, :] + img[:, ::-1] + img[::-1, ::-1]) / 4  # Reflection symmetric base
+            r1 = stmpy.tools.snd.rotate(r0, 120, reshape=False)
+            r2 = stmpy.tools.snd.rotate(r0, -120, reshape=False)
+            return (r0 + r1 + r2) / 3
+
+        elif symmetry == "C6":
+            r1 = stmpy.tools.snd.rotate(img, 60, reshape=False)
+            r2 = stmpy.tools.snd.rotate(img, 120, reshape=False)
+            r3 = stmpy.tools.snd.rotate(img, 180, reshape=False)
+            r4 = stmpy.tools.snd.rotate(img, -60, reshape=False)
+            r5 = stmpy.tools.snd.rotate(img, -120, reshape=False)
+            return (img + r1 + r2 + r3 + r4 + r5) / 6
+
+        else:
+            raise ValueError(f"Unknown symmetry type: {symmetry}")
+
+    if data.ndim == 2:
+        return apply_symmetry_2d(data)
+
+    elif data.ndim == 3:
+        out = np.zeros_like(data)
+        for i in range(data.shape[0]):
+            out[i] = apply_symmetry_2d(data[i])
+        return out
+
+    else:
+        raise ValueError("Input must be a 2D or 3D array.")
