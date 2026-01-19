@@ -1217,7 +1217,7 @@ def cross_correlation_2d_plot(
         axs[2].plot(dx, dy, "ko", ms=3)
         axs[2].axhline(0, ls="--", c="gray")
         axs[2].axvline(0, ls="--", c="gray")
-        axs[2].set_title(f"peak={peak_value:.3f}, center={central_value:.3f}\n")
+        axs[2].set_title(f"peak={peak_value:.3f} at {np.array(iy)}, {np.array(ix)}, center={central_value:.3f}\n")
         axs[2].set_xlabel("dx (pixels)")
         axs[2].set_ylabel("dy (pixels)")
         if xlim is not None:
@@ -1343,7 +1343,6 @@ def plot_topo_and_energy_energy_correlations_sharedx_square(
     # top
     ax0.scatter(en, rE, s=1)
     ax0.axhline(0, ls="--", lw=1, color="gray")
-    ax0.set_ylabel("corr(Topo, dI/dV)")
     ax0.label_outer()
 
     # bottom
@@ -1379,27 +1378,25 @@ def plot_topo_and_energy_energy_correlations_sharedx_square(
 
     cb = fig.colorbar(im, cax=cax)
     # stmpy.image.add_colorbar(ax=ax1, loc=1, label='FFT Amplitude', fs=8)
-
+    # add title
+    ax0.set_title(title_top)
     plt.show()
     return rE, Cmat, ens, idxs
 
-def group_LIY_by_intensity_at_each_energy(en, LIY, n_groups=10, use_nanmean=True):
-    """
-    Group pixels by LIY (dI/dV) intensity at each reference energy, then average full spectra per group.
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 
-    For each reference energy E_ref (i.e., each energy index k):
-      - Take LIY[k, :, :] across pixels
-      - Bin pixels into n_groups by percentiles: top 0-10%, 10-20%, ..., 90-100%
-      - For each bin, average the full LIY spectrum over those pixels
+def group_LIY_by_intensity_at_each_energy(
+    en, LIY, n_groups=10, use_nanmean=True, return_bin_maps=True
+):
+    """
+    Group pixels by LIY intensity at each reference energy, then average full spectra per group.
 
     Returns:
       en_sorted: (nE,)
       LIY_grouped: (nE_ref, nE, n_groups)
-        where LIY_grouped[k, :, g] is the mean spectrum of pixels in group g defined at E_ref=en_sorted[k].
-
-    Notes:
-      - Groups are defined by percentile bins on LIY at the reference energy.
-      - If a group is empty (can happen with many identical values), it will be filled with NaNs.
+      bin_maps (optional): (nE_ref, Ny, Nx) with bin index per pixel, or -1 if invalid.
     """
     en = np.asarray(en)
     LIY = np.asarray(LIY)
@@ -1411,36 +1408,41 @@ def group_LIY_by_intensity_at_each_energy(en, LIY, n_groups=10, use_nanmean=True
     if en.shape[0] != nE:
         raise ValueError("en length must match LIY.shape[0]")
 
-    # ---- sort energies (en might not be ascending) ----
+    # ---- sort energies ----
     order = np.argsort(en)
     en_sorted = en[order]
     LIY_sorted = LIY[order, :, :]
 
-    # ---- flatten pixels dimension ----
+    # ---- flatten pixels ----
     Npix = Ny * Nx
     LIY_flat = LIY_sorted.reshape(nE, Npix)  # (nE, Npix)
 
     mean_fn = np.nanmean if use_nanmean else np.mean
     LIY_grouped = np.full((nE, nE, n_groups), np.nan, dtype=float)
 
-    # percentile edges: 0,10,20,...,100
+    # bin map output
+    bin_maps = None
+    if return_bin_maps:
+        bin_maps = np.full((nE, Ny, Nx), -1, dtype=int)
+
     edges_pct = np.linspace(0, 100, n_groups + 1)
 
     for k_ref in range(nE):
-        vals = LIY_flat[k_ref, :]  # LIY at reference energy across pixels
+        vals = LIY_flat[k_ref, :]  # (Npix,)
 
-        # If vals contains NaNs, we'll ignore them for bin edges and masks
         good = np.isfinite(vals)
         if not np.any(good):
-            continue  # leave NaNs
+            continue
 
         vals_good = vals[good]
-
-        # Compute percentile edges on the good values
         edges = np.percentile(vals_good, edges_pct)
 
-        # Make bins half-open except last: [e0,e1),...,[e_{n-1},e_n]
-        # Also: handle many identical values by letting empty bins become NaN.
+        # We'll fill a 1D bin index array for this reference energy
+        if return_bin_maps:
+            bin_idx_1d = np.full(Npix, -1, dtype=int)
+
+        idx_good = np.where(good)[0]
+
         for g in range(n_groups):
             lo, hi = edges[g], edges[g + 1]
 
@@ -1449,19 +1451,111 @@ def group_LIY_by_intensity_at_each_energy(en, LIY, n_groups=10, use_nanmean=True
             else:
                 in_bin_good = (vals_good >= lo) & (vals_good <= hi)
 
-            # Map back to full pixel mask
-            mask = np.zeros(Npix, dtype=bool)
-            idx_good = np.where(good)[0]
-            mask[idx_good[in_bin_good]] = True
-
-            if not np.any(mask):
+            if not np.any(in_bin_good):
                 continue
 
-            # Average the FULL spectrum over pixels in this bin
-            LIY_grouped[k_ref, :, g] = mean_fn(LIY_flat[:, mask], axis=1)
+            pix_in_bin = idx_good[in_bin_good]  # indices in [0..Npix-1]
 
-    return en_sorted, LIY_grouped
+            # assign bin id
+            if return_bin_maps:
+                bin_idx_1d[pix_in_bin] = g
 
+            # average full spectrum over these pixels
+            LIY_grouped[k_ref, :, g] = mean_fn(LIY_flat[:, pix_in_bin], axis=1)
+
+        if return_bin_maps:
+            bin_maps[k_ref] = bin_idx_1d.reshape(Ny, Nx)
+
+    if return_bin_maps:
+        return en_sorted, LIY_grouped, bin_maps
+    else:
+        return en_sorted, LIY_grouped
+
+def plot_LIY_groups_at_energy_with_binmap(
+    en,
+    LIY_grouped,
+    bin_maps,
+    E_ref,
+    *,
+    energy_is_index=False,
+    cmap="viridis",
+    linewidth=2.0,
+    alpha=0.9,
+    vmin=None,
+    vmax=None,
+):
+    """
+    Left: grouped spectra at chosen reference energy.
+    Right: bin assignment map (which pixels belong to which percentile bin).
+    """
+    en = np.asarray(en)
+    LIY_grouped = np.asarray(LIY_grouped)
+    bin_maps = np.asarray(bin_maps)
+
+    nE_ref, nE, n_groups = LIY_grouped.shape
+    if bin_maps.shape[0] != nE_ref:
+        raise ValueError("bin_maps first dimension must match LIY_grouped first dimension")
+
+    if not energy_is_index:
+        k_ref = int(np.argmin(np.abs(en - E_ref)))
+    else:
+        k_ref = int(E_ref)
+
+    if k_ref < 0 or k_ref >= nE_ref:
+        raise IndexError("Reference energy index out of range")
+
+    fig, (ax0, ax1) = plt.subplots(
+        1, 2, figsize=(10, 4), gridspec_kw={"width_ratios": [1.3, 1.0]}
+    )
+
+    # --- colors for groups (same for lines and map) ---
+    cmap_obj = plt.get_cmap(cmap)
+    colors = cmap_obj(np.linspace(0.15, 0.95, n_groups))
+    disc_cmap = ListedColormap(colors)
+
+    # --- spectra panel ---
+    for g in range(n_groups):
+        spec = LIY_grouped[k_ref, :, g]
+        if np.all(np.isnan(spec)):
+            continue
+        ax0.plot(
+            en,
+            spec,
+            color=colors[g],
+            lw=linewidth,
+            alpha=alpha,
+            label=f"Bin {g+1}",
+        )
+
+    ax0.set_xlabel("Bias (V)")
+    ax0.set_ylabel("dI/dV (a.u.)")
+    ax0.set_title(f"Reference bias = {en[k_ref]:.3g} V")
+    ax0.legend(fontsize=10, frameon=False)
+
+    # --- bin map panel ---
+    bm = bin_maps[k_ref]  # (Ny, Nx) with 0..n_groups-1 or -1
+    bm_masked = np.ma.masked_where(bm < 0, bm)
+
+    im = ax1.imshow(
+        bm_masked,
+        cmap=disc_cmap,
+        interpolation="nearest",
+        vmin=0 if vmin is None else vmin,
+        vmax=(n_groups - 1) if vmax is None else vmax,
+        origin="lower",
+    )
+    ax1.set_title("Bin map at reference bias")
+    ax1.set_xticks([])
+    ax1.set_yticks([])
+
+    cbar = fig.colorbar(im, ax=ax1, fraction=0.046, pad=0.04)
+    cbar.set_ticks(np.arange(n_groups))
+    cbar.set_ticklabels([str(i + 1) for i in range(n_groups)])
+    cbar.set_label("Bin # (low → high percentile)")
+
+    fig.tight_layout()
+    return fig, (ax0, ax1)
+    
 def plot_LIY_groups_at_energy(
     en,
     LIY_grouped,

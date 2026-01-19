@@ -3044,31 +3044,22 @@ def cdw_intensity_map(data, Q, radius,
                       shift_to_center=True,
                       window="None", zeroDC=True, beta=1.0,
                       crop_n=0, show_option='absolute',
-                      show=False):
+                      show=False,
+                      return_complement=False):
     """
     Extract CDW intensity (amplitude) map from a single FFT blob at +Q,
     with optional visualization.
 
+    New:
+    ----
+    - Shows iFFT of the complement (the part NOT selected by the mask) when show=True.
+    - Optionally returns the complement map if return_complement=True.
+
     Parameters
     ----------
-    data : (H, W) array
-        Real-space image.
-    Q : (qx, qy)
-        +Q peak position in FFT pixel coordinates (0-based).
-    radius : float
-        Mask radius in FFT pixels (sigma if method='gaussian').
-    method : 'gaussian' or 'disk'
-        Mask type.
-    shift_to_center : bool
-        If True, shift the +Q blob to DC before iFFT.
-    window, zeroDC, beta : passed to stmpy.tools.fft
-    show : bool
-        If True, show diagnostic plots.
-
-    Returns
-    -------
-    A : (H, W) array
-        CDW intensity (amplitude) map.
+    ... (same as before) ...
+    return_complement : bool
+        If True, also return the (H, W) array of the complement inverse-FFT map.
     """
 
     img = np.asarray(data)
@@ -3113,27 +3104,39 @@ def cdw_intensity_map(data, Q, radius,
     Fq = F * mask
 
     # -------------------------
-    # Shift blob to center
+    # Complement (not-selected) in k-space
+    # -------------------------
+    F_not = F * (1.0 - mask)
+
+    # -------------------------
+    # Shift blob to center (only for the selected +Q)
     # -------------------------
     if shift_to_center:
         dx = int(np.rint(cx - qx))
         dy = int(np.rint(cy - qy))
         Fq = np.roll(np.roll(Fq, dy, axis=0), dx, axis=1)
+        # Note: deliberate choice NOT to shift F_not. If you want to shift it,
+        # uncomment the following two lines:
+        # F_not = np.roll(np.roll(F_not, dy, axis=0), dx, axis=1)
 
     # -------------------------
-    # iFFT → complex field
+    # iFFT → complex fields
     # -------------------------
     psi = stmpy.tools.ifft(Fq, output="complex", envelope=False)
+    psi_not = stmpy.tools.ifft(F_not, output="complex", envelope=False)
 
     # -------------------------
-    # Intensity map
+    # Intensity maps
     # -------------------------
     if show_option == 'absolute':
         A = np.abs(psi)
+        A_not = np.abs(psi_not)
     elif show_option == 'real':
         A = np.real(psi)
+        A_not = np.real(psi_not)
     elif show_option == 'imag':
         A = np.imag(psi)
+        A_not = np.imag(psi_not)
     else:
         raise ValueError("show_option must be 'absolute', 'real', or 'imag'")
 
@@ -3141,10 +3144,10 @@ def cdw_intensity_map(data, Q, radius,
     # Show diagnostics
     # -------------------------
     if show:
-        fig, ax = plt.subplots(2, 2, figsize=(8, 8))
+        # layout: 2 rows x 3 cols
+        fig, ax = plt.subplots(2, 3, figsize=(14, 8))
 
         # (1) Original image
-        
         im0 = ax[0, 0].imshow(img, origin="lower", cmap=stmpy.cm.Blues_r)
         ax[0, 0].set_title("Original")
         ax[0, 0].set_xticks([]); ax[0, 0].set_yticks([])
@@ -3163,28 +3166,49 @@ def cdw_intensity_map(data, Q, radius,
         if crop_n > 0:
             ax[0, 1].set_xlim(cx - crop_n, cx + crop_n)
             ax[0, 1].set_ylim(cy - crop_n, cy + crop_n)
-        # (3) Filtered FFT magnitude
+
+        # (3) Filtered FFT magnitude (selected blob)
         fft_filt_mag = np.abs(Fq)
         clim = _percent_clim(fft_filt_mag)
-        im2 = ax[1, 0].imshow(fft_filt_mag, origin="lower", cmap=stmpy.cm.gray_r, clim=clim)
-        ax[1, 0].set_title("Filtered FFT (after shift)" if shift_to_center
-                           else "Filtered FFT")
-        ax[1, 0].set_xticks([]); ax[1, 0].set_yticks([])
-        plt.colorbar(im2, ax=ax[1, 0], fraction=0.046, pad=0.04)
+        im2 = ax[0, 2].imshow(fft_filt_mag, origin="lower", cmap=stmpy.cm.gray_r, clim=clim)
+        ax[0, 2].set_title("Filtered FFT (selected, after shift)" if shift_to_center
+                           else "Filtered FFT (selected)")
+        ax[0, 2].set_xticks([]); ax[0, 2].set_yticks([])
+        plt.colorbar(im2, ax=ax[0, 2], fraction=0.046, pad=0.04)
         if crop_n > 0:
-            ax[1, 0].set_xlim(cx - crop_n, cx + crop_n)
-            ax[1, 0].set_ylim(cy - crop_n, cy + crop_n)
-        # (4) CDW intensity map
-        im3 = ax[1, 1].imshow(A, origin="lower", cmap=stmpy.cm.Blues_r)
-        ax[1, 1].set_title("CDW intensity |ψ(r)|")
+            ax[0, 2].set_xlim(cx - crop_n, cx + crop_n)
+            ax[0, 2].set_ylim(cy - crop_n, cy + crop_n)
+
+        # (4) CDW intensity map (selected)
+        im3 = ax[1, 0].imshow(A, origin="lower", cmap=stmpy.cm.Blues_r)
+        ax[1, 0].set_title("CDW intensity |ψ(r)| (selected)")
+        ax[1, 0].set_xticks([]); ax[1, 0].set_yticks([])
+        plt.colorbar(im3, ax=ax[1, 0], fraction=0.046, pad=0.04)
+
+        # (5) Complement FFT magnitude (not selected)
+        fft_not_mag = np.abs(F_not)
+        clim = _percent_clim(fft_not_mag)
+        im4 = ax[1, 1].imshow(fft_not_mag, origin="lower", cmap=stmpy.cm.gray_r, clim=clim)
+        ax[1, 1].set_title("FFT magnitude (complement)")
         ax[1, 1].set_xticks([]); ax[1, 1].set_yticks([])
-        plt.colorbar(im3, ax=ax[1, 1], fraction=0.046, pad=0.04)
+        plt.colorbar(im4, ax=ax[1, 1], fraction=0.046, pad=0.04)
+        if crop_n > 0:
+            ax[1, 1].set_xlim(cx - crop_n, cx + crop_n)
+            ax[1, 1].set_ylim(cy - crop_n, cy + crop_n)
+
+        # (6) Complement iFFT map
+        im5 = ax[1, 2].imshow(A_not, origin="lower", cmap=stmpy.cm.Blues_r)
+        ax[1, 2].set_title("Complement map (iFFT of not-selected)")
+        ax[1, 2].set_xticks([]); ax[1, 2].set_yticks([])
+        plt.colorbar(im5, ax=ax[1, 2], fraction=0.046, pad=0.04)
 
         plt.tight_layout()
         plt.show()
 
-    return A
-
+    if return_complement:
+        return A, A_not
+    else:
+        return A
 
 def split_fourier_circles(data, points, radius, mirror=True,
                           method='disk', ifft_mode='real', envelope=False,
@@ -3439,7 +3463,7 @@ def split_fourier_circles(data, points, radius, mirror=True,
 
 def radial_annulus_bandpass(data, r_in, r_out,
                             method='annulus', edge_sigma=None,
-                            envelope=False, sym=None,
+                            ifft_mode='real',envelope=False, sym=None,
                             window='None', zeroDC=True, beta=1.0, crop_n=0, 
                             return_fft=False, return_mask=False,
                             show=False, 
@@ -3489,12 +3513,8 @@ def radial_annulus_bandpass(data, r_in, r_out,
         F_pass = F * mask
         F_stop = F * (1.0 - mask)
 
-        if envelope:
-            pass_real = stmpy.tools.ifft(F_pass, output='absolute', envelope=True)
-            stop_real = stmpy.tools.ifft(F_stop, output='absolute', envelope=True)
-        else:
-            pass_real = stmpy.tools.ifft(F_pass, output='real', envelope=False)
-            stop_real = stmpy.tools.ifft(F_stop, output='real', envelope=False)
+        pass_real = stmpy.tools.ifft(F_pass, output=ifft_mode, envelope=envelope)
+        stop_real = stmpy.tools.ifft(F_stop, output=ifft_mode, envelope=envelope)
 
         return pass_real, stop_real, F_pass, F_stop, F
 
@@ -3532,10 +3552,8 @@ def radial_annulus_bandpass(data, r_in, r_out,
             stop_show = stop_real
         else:
             real_show = np.mean(data, axis=0)
-            pass_show = stmpy.tools.ifft(F_pass, output='real', envelope=False) if not envelope else \
-                        stmpy.tools.ifft(F_pass, output='absolute', envelope=True)
-            stop_show = stmpy.tools.ifft(F_stop, output='real', envelope=False) if not envelope else \
-                        stmpy.tools.ifft(F_stop, output='absolute', envelope=True)
+            pass_show = stmpy.tools.ifft(F_pass, output=ifft_mode, envelope=envelope)
+            stop_show = stmpy.tools.ifft(F_stop, output=ifft_mode, envelope=envelope)
 
         if show_fft_output == 'absolute':
             fft_show = np.abs(F_for_show)
@@ -3884,3 +3902,98 @@ def plot_fft_with_hex_fit(fft_img, fit_out,
 
     plt.tight_layout()
     plt.show()
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+def angle_average_autocorr(C, center=None, dr=1.0, rmax=None,
+                           normalize=True, subtract_floor=False,
+                           return_counts=False, show=True):
+    """
+    Compute and (optionally) plot the angle-averaged autocorrelation C(r).
+
+    Parameters
+    ----------
+    C : 2D array
+        Autocorrelation map.
+    center : (cy, cx) or None
+        Center pixel. If None, uses (ny//2, nx//2).
+    dr : float
+        Radial bin width in pixels.
+    rmax : float or None
+        Max radius in pixels. If None, uses distance to nearest edge.
+    normalize : bool
+        If True, divide C(r) by C(0) (after optional floor subtraction).
+    subtract_floor : bool
+        If True, subtract median value in outer ring (0.8*rmax..rmax).
+    return_counts : bool
+        If True, also return number of pixels per radius bin.
+    show : bool
+        If True, show map + C(r) plot.
+
+    Returns
+    -------
+    r_centers : 1D array
+        Radius bin centers.
+    Cr : 1D array
+        Angle-averaged autocorrelation vs radius.
+    counts : 1D array, optional
+        Pixels per bin (if return_counts=True).
+    """
+    C = np.asarray(C, dtype=float)
+    ny, nx = C.shape
+
+    if center is None:
+        cy, cx = ny // 2, nx // 2
+    else:
+        cy, cx = center
+
+    # radius map
+    y = np.arange(ny) - cy
+    x = np.arange(nx) - cx
+    X, Y = np.meshgrid(x, y)
+    R = np.sqrt(X**2 + Y**2)
+
+    if rmax is None:
+        rmax = min(cx, nx - 1 - cx, cy, ny - 1 - cy)
+
+    C_work = C.copy()
+
+    if subtract_floor:
+        outer = (R >= 0.8 * rmax) & (R <= rmax)
+        floor = np.median(C_work[outer]) if np.any(outer) else 0.0
+        C_work -= floor
+
+    # bin by radius
+    edges = np.arange(0, rmax + dr, dr)
+    r_centers = 0.5 * (edges[:-1] + edges[1:])
+
+    idx = np.digitize(R.ravel(), edges) - 1
+    valid = (idx >= 0) & (idx < len(r_centers))
+
+    sums = np.bincount(idx[valid], weights=C_work.ravel()[valid], minlength=len(r_centers))
+    counts = np.bincount(idx[valid], minlength=len(r_centers))
+    Cr = sums / np.maximum(counts, 1)
+
+    if normalize:
+        c0 = C_work[cy, cx]
+        if c0 != 0:
+            Cr = Cr / c0
+
+    if show:
+        fig, axs = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
+        im = axs[0].imshow(C, origin="lower", interpolation="nearest")
+        axs[0].plot([cx], [cy], "r+", ms=10, mew=2)
+        axs[0].set_title("Autocorrelation map")
+        plt.colorbar(im, ax=axs[0], fraction=0.046, pad=0.04)
+
+        axs[1].plot(r_centers, Cr, marker="o", ms=3, lw=1)
+        axs[1].set_xlabel("radius r (pixels)")
+        axs[1].set_ylabel("angle-avg C(r)" + (" / C(0)" if normalize else ""))
+        axs[1].set_title("Angle-averaged decay")
+        axs[1].grid(True, alpha=0.3)
+        plt.show()
+
+    if return_counts:
+        return r_centers, Cr, counts
+    return r_centers, Cr    

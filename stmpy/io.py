@@ -1063,8 +1063,10 @@ def load_sm4(filePath):
     scan_size = np.abs(self.header[0]['Xscale']*n_pixels*1e9) # in nm
     set_current = self.header[0]['Current']*1e12 # in pA
     set_voltage = self.header[0]['Bias'] # in V
+    scan_Xoffset = self.header[0]['Xoffset']*1e9 # in nm
+    scan_Yoffset = self.header[0]['Yoffset']*1e9 # in nm
 
-    info_str = (f"{set_voltage:.2f}V_{set_current:.1f}pA_{scan_size:.0f}nm_{n_pixels}x{n_pixels}"
+    info_str = (f"{set_voltage:.2f}V_{set_current:.1f}pA_{scan_size:.0f}nm_{n_pixels}x{n_pixels}_x{scan_Xoffset:.0f}nm_y{scan_Yoffset:.0f}nm"
                 )
     
     self.scan_info = {
@@ -1072,7 +1074,8 @@ def load_sm4(filePath):
         'scan_size': scan_size,
         'set_current': set_current,
         'set_voltage': set_voltage,
-        
+        'scan_Xoffset': scan_Xoffset,
+        'scan_Yoffset': scan_Yoffset
     }
     self.info_str = info_str
 
