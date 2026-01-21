@@ -356,56 +356,6 @@ def cumulative_integral_zero_at_origin(x, y):
     return x_sorted, y_sorted, I
 
 
-def plot_correlation(data1, data2, xlabel=None, ylabel=None):
-    """
-    Plot data1 vs data2 and compute Pearson correlation.
-    Accepts 1D or ND arrays (they're flattened). NaN/inf are ignored.
-
-    Returns
-    -------
-    fig : matplotlib.figure.Figure
-    ax  : matplotlib.axes.Axes
-    r   : float (Pearson correlation; NaN if undefined)
-    """
-    x = np.asarray(data1).ravel()
-    y = np.asarray(data2).ravel()
-
-    mask = np.isfinite(x) & np.isfinite(y)
-    xm, ym = x[mask], y[mask]
-
-    if xm.size < 2:
-        r = np.nan
-    else:
-        # Compute Pearson r without SciPy
-        xzc = xm - xm.mean()
-        yzc = ym - ym.mean()
-        denom = np.sqrt((xzc**2).sum() * (yzc**2).sum())
-        r = float((xzc * yzc).sum() / denom) if denom > 0 else np.nan
-
-    fig, ax = plt.subplots(1, 3, figsize=(12, 4))
-    ax[0].imshow(data1, origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
-    ax[0].set_title(xlabel if xlabel is not None else 'Data 1')
-    ax[1].imshow(data2, origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
-    ax[1].set_title(ylabel if ylabel is not None else 'Data 2')
-    ax[2].scatter(xm, ym, s=10, alpha=0.7)
-    if xlabel is not None:
-        ax[2].set_xlabel(xlabel)
-
-    if ylabel is not None:
-        ax[2].set_ylabel(ylabel)
-    # Optional best-fit line
-    if xm.size >= 2 and np.isfinite(r):
-        try:
-            slope, intercept = np.polyfit(xm, ym, 1)
-            xs = np.linspace(xm.min(), xm.max(), 100)
-            ax.plot(xs, slope * xs + intercept, linewidth=2)
-        except Exception:
-            pass
-
-    print(f"Pearson r = {r:.3f}" if np.isfinite(r) else "Pearson r is undefined")
-    
-    return fig, r
-
 
 def compute_shape_params(
     data,
@@ -512,6 +462,10 @@ def compute_shape_params(
         data.iv_math = iv_math
         data.shape_para1 = sp1
         data.shape_para2 = sp2
+        data.shape_para1a = int1.reshape(nx, ny)
+        data.shape_para1b = int2.reshape(nx, ny)
+        data.shape_para2a = int3.reshape(nx, ny)
+        data.shape_para2b = int4.reshape(nx, ny)
 
     if im_show:
         plot_rk_space(data, ens=[e0, e1, e2, e3, e4, e5])
@@ -1197,7 +1151,7 @@ def cross_correlation_2d_plot(
     # Plot (optional)
     # --------------------
     if plot:
-        fig, axs = plt.subplots(1, 3, figsize=(14, 4), constrained_layout=True)
+        fig, axs = plt.subplots(1, 4, figsize=(17, 4), constrained_layout=True)
 
         im0 = axs[0].imshow(A, origin="lower", cmap=stmpy.cm.Blues_r, interpolation='none')
         axs[0].set_title(f"{titleA} ({'high-res' if high_res_label=='A' else 'resampled'})")
@@ -1228,6 +1182,36 @@ def cross_correlation_2d_plot(
         if ylim is not None:
             axs[2].set_ylim(ylim)
         plt.colorbar(im2, ax=axs[2], fraction=0.046, pad=0.04)
+        
+        x = np.asarray(A).ravel()
+        y = np.asarray(B).ravel()
+
+        mask = np.isfinite(x) & np.isfinite(y)
+        xm, ym = x[mask], y[mask]
+
+        if xm.size < 2:
+            r = np.nan
+        else:
+            # Compute Pearson r without SciPy
+            xzc = xm - xm.mean()
+            yzc = ym - ym.mean()
+            denom = np.sqrt((xzc**2).sum() * (yzc**2).sum())
+            r = float((xzc * yzc).sum() / denom) if denom > 0 else np.nan
+
+
+        axs[3].scatter(xm, ym, s=10, alpha=0.7)
+        axs[3].set_xlabel(titleA)
+        axs[3].set_ylabel(titleB)
+        # Optional best-fit line
+        if xm.size >= 2 and np.isfinite(r):
+            try:
+                slope, intercept = np.polyfit(xm, ym, 1)
+                xs = np.linspace(xm.min(), xm.max(), 100)
+                axs[3].plot(xs, slope * xs + intercept, linewidth=2)
+            except Exception:
+                pass
+
+        axs[3].set_title(f"Pearson r = {r:.3f}" if np.isfinite(r) else "Pearson r is undefined")
 
         plt.show()
 
@@ -1636,3 +1620,190 @@ def plot_LIY_groups_at_energy(
     ax.legend(fontsize=12, frameon=False)
 
     return ax
+
+
+import numpy as np
+from scipy.optimize import curve_fit
+import matplotlib.pyplot as plt
+
+# ------------------------
+# basic lorentzian
+# ------------------------
+def lorentz(x, A, x0, gamma):
+    return A * (gamma**2) / ((x - x0)**2 + gamma**2)
+
+
+# ------------------------
+# model
+# ------------------------
+def model_center_plus_two_pairs(
+    x,
+    x0,
+    A0, gamma0,
+    A1, delta1, gamma1,
+    A2, delta2, gamma2,
+    offset
+):
+    y = lorentz(x, A0, x0, gamma0)
+
+    # pair 1
+    y += lorentz(x, A1, x0 + delta1, gamma1)
+    y += lorentz(x, A1, x0 - delta1, gamma1)
+
+    # pair 2
+    y += lorentz(x, A2, x0 + delta2, gamma2)
+    y += lorentz(x, A2, x0 - delta2, gamma2)
+
+    return y + offset
+
+
+# ------------------------
+# fitting + plotting
+# ------------------------
+def fit_center_and_two_pairs(
+    x,
+    y,
+    p0,
+    bounds=None,
+    plot=False,
+    maxfev=20000
+):
+    """
+    Fit a central Lorentzian + two symmetric Lorentzian pairs.
+
+    Parameter order:
+      [ x0,
+        A0, gamma0,
+        A1, delta1, gamma1,
+        A2, delta2, gamma2,
+        offset ]
+    """
+
+    param_names = [
+        "x0",
+        "A0", "gamma0",
+        "A1", "delta1", "gamma1",
+        "A2", "delta2", "gamma2",
+        "offset"
+    ]
+
+    # fit
+    if bounds is None:
+        popt, pcov = curve_fit(
+            model_center_plus_two_pairs,
+            x, y, p0=p0, maxfev=maxfev
+        )
+    else:
+        popt, pcov = curve_fit(
+            model_center_plus_two_pairs,
+            x, y, p0=p0, bounds=bounds, maxfev=maxfev
+        )
+
+    # plotting
+    if plot:
+        x0, A0, g0, A1, d1, g1, A2, d2, g2, off = popt
+
+        y_fit = model_center_plus_two_pairs(x, *popt)
+
+        y_center = lorentz(x, A0, x0, g0) + off
+        y_pair1 = (
+            lorentz(x, A1, x0 + d1, g1)
+            + lorentz(x, A1, x0 - d1, g1)
+        )
+        y_pair2 = (
+            lorentz(x, A2, x0 + d2, g2)
+            + lorentz(x, A2, x0 - d2, g2)
+        )
+
+        plt.figure(figsize=(8, 5))
+        plt.plot(x, y, "k.", ms=4, label="data")
+        plt.plot(x, y_fit, "r-", lw=2, label="total fit")
+        plt.plot(x, y_center, "--", lw=1.5, label="central Lorentzian")
+        plt.plot(x, y_pair1, "--", lw=2, label="pair 1")
+        plt.plot(x, y_pair2, "--", lw=2, label="pair 2")
+
+        plt.xlabel("x")
+        plt.ylabel("intensity")
+        plt.legend()
+        plt.tight_layout()
+
+
+        delta1 = popt[4]
+        delta2 = popt[7]
+        delta1_err = np.sqrt(pcov[4, 4])
+        delta2_err = np.sqrt(pcov[7, 7])
+        # ratio
+        ratio = delta2/delta1
+        ratio_err = ratio * np.sqrt(
+            (delta1_err / delta1)**2 + (delta2_err / delta2)**2
+        )
+        plt.title(f"charge ordering period/lattice constant = {ratio:.2f} ± {ratio_err:.2f}")
+        plt.show()
+    return popt, pcov, param_names
+
+
+# --- Model: central + one symmetric pair + offset ---
+def model_center_plus_one_pair(x,
+                              x0,            # center position
+                              A0, gamma0,    # central Lorentzian
+                              A1, delta1, gamma1,  # symmetric pair at x0±delta1
+                              offset):       # constant background
+    y = lorentz(x, A0, x0, gamma0)
+    # symmetric pair
+    y += lorentz(x, A1, x0 + delta1, gamma1)
+    y += lorentz(x, A1, x0 - delta1, gamma1)
+    return y + offset
+
+# --- Fit function with optional plotting ---
+def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_peaks=False, maxfev=20000):
+    """
+    Fit central Lorentzian + one symmetric Lorentzian pair + constant offset.
+
+    Parameter order for p0 / popt:
+      [ x0,
+        A0, gamma0,
+        A1, delta1, gamma1,
+        offset ]
+
+    Returns:
+      popt, pcov, param_names, model_callable
+    """
+    param_names = [
+        "x0",
+        "A0", "gamma0",
+        "A1", "delta1", "gamma1",
+        "offset"
+    ]
+
+    # perform fit
+    if bounds is None:
+        popt, pcov = curve_fit(model_center_plus_one_pair, x, y, p0=p0, maxfev=maxfev)
+    else:
+        popt, pcov = curve_fit(model_center_plus_one_pair, x, y, p0=p0, bounds=bounds, maxfev=maxfev)
+
+    # plotting
+    if plot:
+        x0, A0, g0, A1, d1, g1, off = popt
+        y_fit = model_center_plus_one_pair(x, *popt)
+        y_center = lorentz(x, A0, x0, g0) + off
+        y_pair = lorentz(x, A1, x0 + d1, g1) + lorentz(x, A1, x0 - d1, g1)
+
+        plt.figure(figsize=(8,5))
+        plt.plot(x, y, 'k.', ms=4, label='data')
+        plt.plot(x, y_fit, 'r-', lw=2, label='total fit')
+        plt.plot(x, y_center, '--', lw=1.5, label='central Lorentzian (with offset)')
+        plt.plot(x, y_pair, '--', lw=2, label='symmetric pair (sum)')
+
+        if show_individual_peaks:
+            y_plus = lorentz(x, A1, x0 + d1, g1) + 0.0
+            y_minus = lorentz(x, A1, x0 - d1, g1) + 0.0
+            plt.plot(x, y_plus, '--', lw=1.2, label='pair: +peak')
+            plt.plot(x, y_minus, '--', lw=1.2, label='pair: -peak')
+
+        plt.xlabel('x')
+        plt.ylabel('intensity')
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    return popt, pcov, param_names, model_center_plus_one_pair
