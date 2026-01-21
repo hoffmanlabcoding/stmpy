@@ -1086,11 +1086,14 @@ def plot_rk_space(data, ens=None):
         stmpy.image.add_scale_bar(5, data.scan_info['scan_size'], data.scan_info['n_pixels'], fs=12, pad=0.1, ax=ax)
 
 
-def plot_histogram(data):
+def plot_histogram(data, title='Histogram of IV at en = 1.3', xlabel='I (pA)', xlim=None):
     plt.figure(figsize=(5, 3))
     plt.hist(data, bins=50, alpha=0.85, edgecolor='none')
+    plt.xlabel(xlabel)
     plt.ylabel('Count')
-    plt.title('Histogram of IV at en = 1.3')
+    if xlim is not None:
+        plt.xlim(xlim)
+    plt.title(title)
     plt.tight_layout()
     plt.show()
 
