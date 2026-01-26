@@ -3459,21 +3459,28 @@ def split_fourier_circles(data, points, radius, mirror=True,
             outs += [mask]
         return tuple(outs)
     
-
-
 def radial_annulus_bandpass(data, r_in, r_out,
                             method='annulus', edge_sigma=None,
-                            ifft_mode='real',envelope=False, sym=None,
-                            window='None', zeroDC=True, beta=1.0, crop_n=0, 
+                            ifft_mode='real', envelope=False, sym=None,
+                            window='None', zeroDC=True, beta=1.0, crop_n=0,
                             return_fft=False, return_mask=False,
-                            show=False, 
-                            show_fft_output='absolute'):
+                            show=False,
+                            show_fft_output='absolute',
+                            # --- NEW options ---
+                            plot_ring_profile=True,
+                            theta_bins=360,
+                            ring_profile_stat='mean'):
     """
     Radial annular band-pass filter centered at the FFT origin (DC), i.e. the FFT center.
 
     Keeps Fourier components with radius r_in <= r <= r_out from the FFT center.
+
+    NEW (when show=True):
+      - Plots annulus intensity vs angle (0..360 deg), starting at +x and going CCW,
+        consistent with origin='lower'.
     """
 
+    import numpy as np
     data = np.asarray(data)
     if data.ndim not in (2, 3):
         raise ValueError("data must be 2D or 3D numpy array.")
@@ -3489,7 +3496,13 @@ def radial_annulus_bandpass(data, r_in, r_out,
 
     x = np.linspace(1, W, W)[None, :]
     y = np.linspace(1, H, H)[:, None]
-    r = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+
+    dx = x - cx
+    dy = y - cy
+    r = np.sqrt(dx**2 + dy**2)
+
+    # angle: 0 deg at +x axis, CCW, with origin='lower' (y increases upwards)
+    theta = (np.degrees(np.arctan2(dy, dx)) + 360.0) % 360.0  # (H, W)
 
     if method == 'annulus':
         mask = ((r >= r_in) & (r <= r_out)).astype(float)
@@ -3542,6 +3555,45 @@ def radial_annulus_bandpass(data, r_in, r_out,
         __pr, __sr, __Fp, __Fs, F_for_show = _filter_layer(mean_layer)
         F_pass, F_stop = __Fp, __Fs
 
+    # -------------------------
+    # Helper: angular profile
+    # -------------------------
+    def _annulus_angular_profile(img, theta_deg, weight_mask,
+                                 n_bins=360, stat='mean'):
+        """
+        Weighted angular statistic over 0..360.
+        - img: 2D (H,W), e.g. |FFT|
+        - theta_deg: 2D (H,W) in [0,360)
+        - weight_mask: 2D (H,W) (binary or soft). Only nonzero used.
+        """
+        img = np.asarray(img)
+        w = np.asarray(weight_mask)
+
+        valid = np.isfinite(img) & np.isfinite(theta_deg) & np.isfinite(w) & (w > 0)
+        if not np.any(valid):
+            centers = (np.linspace(0, 360, n_bins + 1)[:-1] + (180.0 / n_bins))
+            return centers, np.full_like(centers, np.nan, dtype=float)
+
+        th = theta_deg[valid].ravel()
+        vv = img[valid].ravel()
+        ww = w[valid].ravel()
+
+        bins = np.linspace(0.0, 360.0, int(n_bins) + 1)
+        centers = 0.5 * (bins[:-1] + bins[1:])
+
+        if stat == 'sum':
+            num, _ = np.histogram(th, bins=bins, weights=vv * ww)
+            prof = num
+        elif stat == 'mean':
+            num, _ = np.histogram(th, bins=bins, weights=vv * ww)
+            den, _ = np.histogram(th, bins=bins, weights=ww)
+            prof = num / (den + 1e-30)
+            prof[den == 0] = np.nan
+        else:
+            raise ValueError("ring_profile_stat must be 'mean' or 'sum'")
+
+        return centers, prof
+
     if show:
         import matplotlib.pyplot as plt
         import matplotlib.patches as patches
@@ -3557,27 +3609,19 @@ def radial_annulus_bandpass(data, r_in, r_out,
 
         if show_fft_output == 'absolute':
             fft_show = np.abs(F_for_show)
+            ring_ylabel = '|FFT|'
         elif show_fft_output == 'real':
             fft_show = np.real(F_for_show)
+            ring_ylabel = 'Re(FFT)'
         elif show_fft_output == 'imag':
             fft_show = np.imag(F_for_show)
+            ring_ylabel = 'Im(FFT)'
         elif show_fft_output == 'phase':
             fft_show = np.angle(F_for_show)
+            ring_ylabel = 'phase(FFT)'
         else:
             raise ValueError("show_fft_output must be 'absolute','real','imag','phase'")
 
-        *_, Y, X = np.shape(fft_show)
-        
-        # if r is not None:
-        #     Lx = X * r
-        #     Ly = Y * r
-        #     x = np.arange(X)
-        #     y = np.arange(Y)
-        #     p0 = [int(X/2), int(Y/2), Lx, Ly, 1, np.pi/2]
-        #     G = 1-stmpy.tools.gauss2d(x, y, p=p0)
-        # else:
-        #     G = 1
-        # fft_show = fft_show * G
         fig, ax = plt.subplots(2, 2, figsize=(8, 8))
 
         clim = _percent_clim(real_show)
@@ -3621,12 +3665,34 @@ def radial_annulus_bandpass(data, r_in, r_out,
         plt.tight_layout()
         plt.show()
 
+        # --- NEW: angle profile of annulus ---
+        if plot_ring_profile:
+            ang, prof = _annulus_angular_profile(
+                img=fft_show,
+                theta_deg=theta,
+                weight_mask=mask,      # binary for annulus, soft weights for gaussian
+                n_bins=theta_bins,
+                stat=ring_profile_stat
+            )
+
+            fig2, ax2 = plt.subplots(1, 1, figsize=(8, 3.2))
+            ax2.plot(ang, prof)
+            ax2.set_xlim(0, 360)
+            ax2.set_xticks(np.arange(0, 361, 45))
+            ax2.set_xlabel('Angle (deg): 0°=+x, CCW')
+            ax2.set_ylabel(f'{ring_profile_stat} {ring_ylabel} in annulus')
+            ax2.set_title('Annulus intensity vs angle')
+            ax2.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.show()
+
     outs = [pass_real, stop_real]
     if return_fft:
         outs += ([F_pass, F_stop] if data.ndim == 2 else [F_pass_all, F_stop_all])
     if return_mask:
         outs += [mask]
     return tuple(outs)
+
 
 def _percent_clim(img):
     v = img[np.isfinite(img)]
@@ -3635,8 +3701,6 @@ def _percent_clim(img):
     # return percentile-based clim
     return [np.percentile(v, 1), np.percentile(v, 99)]
 
-
-import numpy as np
 
 def fit_fft_center_plus_hex6(
     fft_img,
