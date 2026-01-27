@@ -92,7 +92,6 @@ def plot_FFT_data(data,
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_aspect('equal')
-    fig.tight_layout()
     return fig, ax
 
 def _process_pipeline(Z, window_type='hanning'):
@@ -262,7 +261,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
             plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[6])
 
     if make_plots:
-        fig_topo.tight_layout()
+        # fig_topo.tight_layout()
         #add title
         if not dos_map:
             if not RHK_format:
