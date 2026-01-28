@@ -1714,12 +1714,12 @@ def fit_center_and_two_pairs(
             + lorentz(x, A2, x0 - d2, g2)
         )
 
-        plt.figure(figsize=(8, 5))
-        plt.plot(x, y, "k.", ms=4, label="data")
-        plt.plot(x, y_fit, "r-", lw=2, label="total fit")
-        plt.plot(x, y_center, "--", lw=1.5, label="central Lorentzian")
-        plt.plot(x, y_pair1, "--", lw=2, label="pair 1")
-        plt.plot(x, y_pair2, "--", lw=2, label="pair 2")
+        plt.figure(figsize=(6, 3))
+        plt.plot(x, y, "k.", ms=2, label="data")
+        plt.plot(x, y_fit, "r-", lw=1, label="total fit")
+        plt.plot(x, y_center, "--", lw=1, label="central Lorentzian")
+        plt.plot(x, y_pair1, "--", lw=1, label="pair 1")
+        plt.plot(x, y_pair2, "--", lw=1, label="pair 2")
 
         plt.xlabel("x")
         plt.ylabel("intensity")

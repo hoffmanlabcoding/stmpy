@@ -3459,28 +3459,43 @@ def split_fourier_circles(data, points, radius, mirror=True,
             outs += [mask]
         return tuple(outs)
     
-def radial_annulus_bandpass(data, r_in, r_out,
-                            method='annulus', edge_sigma=None,
-                            ifft_mode='real', envelope=False, sym=None,
-                            window='None', zeroDC=True, beta=1.0, crop_n=0,
-                            return_fft=False, return_mask=False,
-                            show=False,
-                            show_fft_output='absolute',
-                            # --- NEW options ---
-                            plot_ring_profile=True,
-                            theta_bins=360,
-                            ring_profile_stat='mean'):
+def radial_annulus_bandpass(
+    data, r_in, r_out,
+    method='annulus', edge_sigma=None,
+    ifft_mode='real', envelope=False, sym=None,
+    window='None', zeroDC=True, beta=1.0, crop_n=0,
+    return_fft=False, return_mask=False,
+    show=False,
+    show_fft_output='absolute',
+    # ---- ring / anisotropy options ----
+    plot_ring_profile=True,
+    theta_bins=360,
+    ring_profile_stat='mean',   # kept for backward-compat (hist method)
+    ring_profile_method='sample',  # 'sample' (recommended) or 'hist'
+    ring_r=None,                  # if None -> use 0.5*(r_in+r_out)
+    ring_dr=None,                 # if None -> use 0.5*(r_out-r_in) (>=1)
+    ring_interp_order=1,          # 0 nearest, 1 bilinear
+    ring_smooth_sigma=None,       # in bins, circular smoothing; None disables
+    ring_return_wrapped=True      # plot/return with a closing point at 360
+):
     """
     Radial annular band-pass filter centered at the FFT origin (DC), i.e. the FFT center.
 
     Keeps Fourier components with radius r_in <= r <= r_out from the FFT center.
 
-    NEW (when show=True):
-      - Plots annulus intensity vs angle (0..360 deg), starting at +x and going CCW,
+    When show=True and plot_ring_profile=True:
+      - Plots annulus intensity vs angle (0..360 deg), 0°=+x and CCW,
         consistent with origin='lower'.
+
+    Ring profile methods:
+      - ring_profile_method='sample' (recommended): sample FFT along a circular ring
+        (optionally averaging across a thickness dr) using interpolation. This avoids
+        grid-quantization artifacts that often cause spikes near 0/90/180/270.
+      - ring_profile_method='hist': your original histogram-binning within the annulus.
     """
 
     import numpy as np
+
     data = np.asarray(data)
     if data.ndim not in (2, 3):
         raise ValueError("data must be 2D or 3D numpy array.")
@@ -3490,12 +3505,13 @@ def radial_annulus_bandpass(data, r_in, r_out,
     H = data.shape[-2]
     W = data.shape[-1]
 
-    # stmpy convention: x in [1..W], y in [1..H], center at (W+1)/2, (H+1)/2
-    cx = (W + 1) / 2.0
-    cy = (H + 1) / 2.0
+    # ---- Use a consistent 0-based pixel coordinate convention ----
+    # This matches imshow(..., origin='lower') coordinates directly.
+    cx = (W - 1) / 2.0
+    cy = (H - 1) / 2.0
 
-    x = np.linspace(1, W, W)[None, :]
-    y = np.linspace(1, H, H)[:, None]
+    x = np.arange(W)[None, :]   # 0..W-1
+    y = np.arange(H)[:, None]   # 0..H-1
 
     dx = x - cx
     dy = y - cy
@@ -3504,11 +3520,13 @@ def radial_annulus_bandpass(data, r_in, r_out,
     # angle: 0 deg at +x axis, CCW, with origin='lower' (y increases upwards)
     theta = (np.degrees(np.arctan2(dy, dx)) + 360.0) % 360.0  # (H, W)
 
+    # -------------------------
+    # Build band-pass mask
+    # -------------------------
     if method == 'annulus':
         mask = ((r >= r_in) & (r <= r_out)).astype(float)
 
     elif method == 'gaussian':
-        # soft edges on r_in and r_out (no scipy): tanh-based smooth steps
         if edge_sigma is None:
             edge_sigma = max((r_out - r_in) / 6.0, 1e-6)
         s = float(edge_sigma)
@@ -3520,6 +3538,9 @@ def radial_annulus_bandpass(data, r_in, r_out,
     else:
         raise ValueError('method must be "annulus" or "gaussian"')
 
+    # -------------------------
+    # Filtering core
+    # -------------------------
     def _filter_layer(layer):
         F = stmpy.tools.fft(layer, window=window, output='complex',
                             zeroDC=zeroDC, beta=beta, units='None')
@@ -3556,34 +3577,51 @@ def radial_annulus_bandpass(data, r_in, r_out,
         F_pass, F_stop = __Fp, __Fs
 
     # -------------------------
-    # Helper: angular profile
+    # Helpers: ring profile
     # -------------------------
-    def _annulus_angular_profile(img, theta_deg, weight_mask,
-                                 n_bins=360, stat='mean'):
+    def _circular_smooth(prof, sigma):
+        """Circular Gaussian smoothing (bins). Uses scipy if available, else fallback convolution."""
+        import numpy as np
+        if sigma is None or sigma <= 0:
+            return prof
+        try:
+            from scipy.ndimage import gaussian_filter1d
+            return gaussian_filter1d(prof, sigma=float(sigma), mode='wrap')
+        except Exception:
+            # fallback gaussian kernel conv, circular via repetition
+            sigma = float(sigma)
+            hw = max(1, int(np.ceil(4.0 * sigma)))
+            x = np.arange(-hw, hw + 1)
+            kern = np.exp(-0.5 * (x / (sigma + 1e-30)) ** 2)
+            kern = kern / (kern.sum() + 1e-30)
+            prof_ext = np.concatenate([prof, prof, prof])
+            prof_conv = np.convolve(prof_ext, kern, mode='same')
+            n = len(prof)
+            return prof_conv[n:2 * n]
+
+    def _annulus_angular_profile_hist(img, theta_deg, weight_mask, n_bins=360, stat='mean'):
         """
-        Weighted angular statistic over 0..360.
-        - img: 2D (H,W), e.g. |FFT|
-        - theta_deg: 2D (H,W) in [0,360)
-        - weight_mask: 2D (H,W) (binary or soft). Only nonzero used.
+        Weighted angular statistic over 0..360 using histogram binning inside the annulus mask.
         """
         img = np.asarray(img)
         w = np.asarray(weight_mask)
+        th_grid = np.asarray(theta_deg)
 
-        valid = np.isfinite(img) & np.isfinite(theta_deg) & np.isfinite(w) & (w > 0)
-        if not np.any(valid):
-            centers = (np.linspace(0, 360, n_bins + 1)[:-1] + (180.0 / n_bins))
-            return centers, np.full_like(centers, np.nan, dtype=float)
-
-        th = theta_deg[valid].ravel()
-        vv = img[valid].ravel()
-        ww = w[valid].ravel()
-
+        valid = np.isfinite(img) & np.isfinite(th_grid) & np.isfinite(w) & (w > 0)
         bins = np.linspace(0.0, 360.0, int(n_bins) + 1)
         centers = 0.5 * (bins[:-1] + bins[1:])
 
+        if not np.any(valid):
+            prof = np.full_like(centers, np.nan, dtype=float)
+            return centers, prof
+
+        th = th_grid[valid].ravel()
+        vv = img[valid].ravel()
+        ww = w[valid].ravel()
+
         if stat == 'sum':
             num, _ = np.histogram(th, bins=bins, weights=vv * ww)
-            prof = num
+            prof = num.astype(float)
         elif stat == 'mean':
             num, _ = np.histogram(th, bins=bins, weights=vv * ww)
             den, _ = np.histogram(th, bins=bins, weights=ww)
@@ -3594,6 +3632,62 @@ def radial_annulus_bandpass(data, r_in, r_out,
 
         return centers, prof
 
+    def _annulus_angular_profile_sample(img, cx, cy, r0, dr, n_angles=360, order=1, stat='mean'):
+        """
+        Sample `img` around a ring at radius r0 and thickness dr using interpolation.
+        Returns angles in degrees (0..360) and profile.
+        """
+        img = np.asarray(img)
+        angles = np.linspace(0.0, 2*np.pi, int(n_angles), endpoint=False)  # 0..2pi
+        ang_deg = np.degrees(angles)
+
+        # radii to average over
+        dr = float(dr)
+        if dr <= 0:
+            radii = np.array([float(r0)], dtype=float)
+        else:
+            # choose a small set of radii across the thickness
+            n_r = max(1, int(np.ceil(2*dr)) + 1)
+            radii = np.linspace(max(0.0, r0 - dr), r0 + dr, n_r)
+
+        # interpolation
+        try:
+            from scipy.ndimage import map_coordinates
+            has_scipy = True
+        except Exception:
+            has_scipy = False
+
+        vals_stack = []
+        for rr in radii:
+            xs = cx + rr * np.cos(angles)
+            ys = cy + rr * np.sin(angles)
+
+            if has_scipy:
+                coords = np.vstack([ys, xs])  # (rows, cols)
+                vals = map_coordinates(img, coords, order=int(order), mode='reflect')
+            else:
+                xi = np.rint(xs).astype(int)
+                yi = np.rint(ys).astype(int)
+                xi = np.clip(xi, 0, img.shape[1] - 1)
+                yi = np.clip(yi, 0, img.shape[0] - 1)
+                vals = img[yi, xi]
+
+            vals_stack.append(vals)
+
+        vals_stack = np.vstack(vals_stack)  # (n_r, n_angles)
+
+        if stat == 'mean':
+            prof = np.nanmean(vals_stack, axis=0)
+        elif stat == 'sum':
+            prof = np.nansum(vals_stack, axis=0)
+        else:
+            raise ValueError("ring_profile_stat must be 'mean' or 'sum'")
+
+        return ang_deg, prof
+
+    # -------------------------
+    # Show / plotting
+    # -------------------------
     if show:
         import matplotlib.pyplot as plt
         import matplotlib.patches as patches
@@ -3638,15 +3732,16 @@ def radial_annulus_bandpass(data, r_in, r_out,
         ax[0, 1].set_xticks([]); ax[0, 1].set_yticks([])
         ax[0, 1].imshow(mask, cmap='Reds', origin='lower', alpha=0.25)
 
-        # draw r_in / r_out circles around the FFT center
-        ax[0, 1].add_patch(patches.Circle((cx - 1.0, cy - 1.0), r_out,
+        # draw r_in / r_out circles around the FFT center (0-based coords)
+        ax[0, 1].add_patch(patches.Circle((cx, cy), r_out,
                                           fill=False, ec='cyan', lw=1.2))
-        ax[0, 1].add_patch(patches.Circle((cx - 1.0, cy - 1.0), r_in,
+        ax[0, 1].add_patch(patches.Circle((cx, cy), r_in,
                                           fill=False, ec='cyan', lw=1.2, ls='--'))
         plt.colorbar(im1, ax=ax[0, 1], fraction=0.046, pad=0.04)
+
         if crop_n > 0:
-            ax[0, 1].set_xlim(cx - crop_n - 1, cx + crop_n - 1)
-            ax[0, 1].set_ylim(cy - crop_n - 1, cy + crop_n - 1)
+            ax[0, 1].set_xlim(cx - crop_n, cx + crop_n)
+            ax[0, 1].set_ylim(cy - crop_n, cy + crop_n)
 
         clim = _percent_clim(pass_show)
         im2 = ax[1, 0].imshow(pass_show, cmap=stmpy.cm.Blues_r, origin='lower',
@@ -3665,23 +3760,47 @@ def radial_annulus_bandpass(data, r_in, r_out,
         plt.tight_layout()
         plt.show()
 
-        # --- NEW: angle profile of annulus ---
+        # --- ring profile plot ---
         if plot_ring_profile:
-            ang, prof = _annulus_angular_profile(
-                img=fft_show,
-                theta_deg=theta,
-                weight_mask=mask,      # binary for annulus, soft weights for gaussian
-                n_bins=theta_bins,
-                stat=ring_profile_stat
-            )
+            # defaults
+            if ring_r is None:
+                ring_r = 0.5 * (float(r_in) + float(r_out))
+            if ring_dr is None:
+                ring_dr = max(1.0, 0.5 * (float(r_out) - float(r_in)))
+
+            if ring_profile_method == 'sample':
+                ang, prof = _annulus_angular_profile_sample(
+                    img=fft_show, cx=cx, cy=cy,
+                    r0=float(ring_r), dr=float(ring_dr),
+                    n_angles=int(theta_bins),
+                    order=int(ring_interp_order),
+                    stat='mean' if ring_profile_stat == 'mean' else 'sum'
+                )
+            elif ring_profile_method == 'hist':
+                ang, prof = _annulus_angular_profile_hist(
+                    img=fft_show, theta_deg=theta, weight_mask=mask,
+                    n_bins=int(theta_bins), stat=ring_profile_stat
+                )
+            else:
+                raise ValueError("ring_profile_method must be 'sample' or 'hist'")
+
+            # optional smoothing on circle
+            prof = _circular_smooth(prof, ring_smooth_sigma)
 
             fig2, ax2 = plt.subplots(1, 1, figsize=(8, 3.2))
-            ax2.plot(ang, prof)
+
+            if ring_return_wrapped:
+                ang_plot = np.r_[ang, 360.0]
+                prof_plot = np.r_[prof, prof[0]]
+                ax2.plot(ang_plot, prof_plot)
+            else:
+                ax2.plot(ang, prof)
+
             ax2.set_xlim(0, 360)
             ax2.set_xticks(np.arange(0, 361, 45))
             ax2.set_xlabel('Angle (deg): 0°=+x, CCW')
-            ax2.set_ylabel(f'{ring_profile_stat} {ring_ylabel} in annulus')
-            ax2.set_title('Annulus intensity vs angle')
+            ax2.set_ylabel(f'{ring_profile_stat} {ring_ylabel} in ring/annulus')
+            ax2.set_title(f'Annulus intensity vs angle ({ring_profile_method})')
             ax2.grid(True, alpha=0.3)
             plt.tight_layout()
             plt.show()

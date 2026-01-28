@@ -1185,14 +1185,11 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=0, r=None,
     if show:
         plt.figure(figsize=[4, 4])
         if crop_n > 0 :
-            c = np.mean(F[crop_n:-crop_n, crop_n:-crop_n])
-            s = np.std(F[crop_n:-crop_n, crop_n:-crop_n])
+            clim = np.percentile(F[crop_n:-crop_n, crop_n:-crop_n], [1, 99])
         else:
-            c = np.mean(F)
-            s = np.std(F)
-            
+            clim = np.percentile(F, [1, 99])
         plt.imshow(F, cmap=plt.cm.gray_r, interpolation='None',
-                   origin='lower', clim=[0, c+5*s], aspect=1)
+                   origin='lower', clim=clim, aspect=1)
         plt.plot(coords[:, 0], coords[:, 1], 'r.')
         plt.gca().set_aspect(1)
         plt.axis('tight')
