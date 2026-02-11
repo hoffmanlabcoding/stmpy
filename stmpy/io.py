@@ -36,7 +36,7 @@ PY2 = sys.version_info.major == 2
 PY3 = sys.version_info.major == 3
 
 
-def load(filePath, biasOffset=True, niceUnits=False):
+def load(filePath, biasOffset=True, niceUnits=False, single_point_spectra=False):
     '''
     Loads data into python. Please include the file extension in the path.
 
@@ -66,6 +66,7 @@ def load(filePath, biasOffset=True, niceUnits=False):
                                  for where the current is zero.
         niceUnits   - Optional : Put lock-in channel units as nS (in future
                                  will switch Z to pm, etc.)
+        single_point_spectral  - Optional : If True, loads single point spectra
     Returns:
         spyObject  - Custom object with attributes appropriate to the type of
                       data and containing experiment parameters in a header.
@@ -113,9 +114,11 @@ def load(filePath, biasOffset=True, niceUnits=False):
             dataObject = _nice_units(dataObject, extension)
         return dataObject
 
-    elif extension in ['spy', 'sxm', 'nvi', 'nvl', 'nsp', 'asc', 'sm4', 
+    elif extension in ['spy', 'sxm', 'nvi', 'nvl', 'nsp', 'asc', 
                        '2FL', '1FL', 'TFR', '1FR', 'FFL']:
         return eval(loadFn)(filePath)
+    elif extension in ['sm4']:
+        return eval(loadFn)(filePath, single_point_spectra=single_point_spectra)
 
   #  elif filePath.endswith('.mat'):
   #      raw_mat = matio.loadmat(filePath)
@@ -894,11 +897,12 @@ def load_asc(filePath):
     return self
 
         
-def load_sm4(filePath):
+def load_sm4(filePath, single_point_spectra=False):
     ''' Load RHK SM4 files into python.
 
     Inputs:
         filePath- Required : Name of the file
+        single_point_spectra- Optional : If True, loads single point spectra
         
     Returns:
         self.info     - information of the pages
@@ -977,15 +981,20 @@ def load_sm4(filePath):
             return 1
         return 0
 
-    def ensure_square(data, order='C'):
+    def ensure_square(data, order='C', single_point_spectra=single_point_spectra):
         arr = np.asarray(data)
         if arr.ndim == 2:
             n_pixels_flat, depth = arr.shape
             s = int(np.sqrt(n_pixels_flat))
-            if s * s != n_pixels_flat:
-                raise ValueError(f"First dim {n_pixels_flat} is not a perfect square")
-            data = arr.reshape(s, s, depth, order=order)
-            data = np.moveaxis(data, -1, 0)   # third -> first
+            print(s)
+            print(n_pixels_flat)
+            if not single_point_spectra:
+                if s * s != n_pixels_flat:
+                    raise ValueError(f"First dim {n_pixels_flat} is not a perfect square")
+                data = arr.reshape(s, s, depth, order=order)
+                data = np.moveaxis(data, -1, 0)   # third -> first
+            else:
+                data = data
             return data
 
         raise ValueError(f"data must be 2D or 3D array; got {arr.ndim}D")
@@ -1013,36 +1022,40 @@ def load_sm4(filePath):
     # print(dir(self))    
 
     if _make_attr(self, 'LIY', [liy], 'data'):
-        self.LIY = ensure_square(self.LIY)[:, ::-1, ::-1][self.order]
-        self.didvStd = np.std(self.LIY, axis=0)
-        self.didv = np.mean(self.LIY, axis=0)
-
-        if match_channel('LINELIA current', liy+1) or match_channel('LINELIA Current', liy+1):
-            if _make_attr(self, 'LIY_BWD', [liy+1], 'data'):
-                self.LIY_BWD = ensure_square(self.LIY_BWD)[:, ::-1, ::-1][self.order]
-                self.didv_BWD = np.mean(self.LIY_BWD, axis=0)
-                self.didvStd_BWD = np.std(self.LIY_BWD, axis=0)
-                print('LIY FWD and BWD found')
-
+        if single_point_spectra:
+            self.LIY = self.LIY
         else:
-                print('LIY only FWD found')
-
+            print(self.LIY.shape)
+            self.LIY = ensure_square(self.LIY)[:, ::-1, ::-1][self.order]
+            self.didvStd = np.std(self.LIY, axis=0)
+            self.didv = np.mean(self.LIY, axis=0)
+            
+            if match_channel('LINELIA current', liy+1) or match_channel('LINELIA Current', liy+1):
+                if _make_attr(self, 'LIY_BWD', [liy+1], 'data'):
+                    self.LIY_BWD = ensure_square(self.LIY_BWD)[:, ::-1, ::-1][self.order]
+                    self.didv_BWD = np.mean(self.LIY_BWD, axis=0)
+                    self.didvStd_BWD = np.std(self.LIY_BWD, axis=0)
+                    print('LIY FWD and BWD found')
+            else:
+                    print('LIY only FWD found')
     else:
         print('ERR: LIY channel not found')
     
 
     if _make_attr(self, 'I', [i], 'data'):
-        
-        self.I = ensure_square(self.I)[:, ::-1, ::-1][self.order]
-        self.iv = np.mean(self.I,  axis=0)
-        
-        if match_channel('LINECurrent', i+1):
-            if _make_attr(self, 'I_BWD', [i+1], 'data'):
-                self.I_BWD = ensure_square(self.I_BWD)[:, ::-1, ::-1][self.order]
-                self.iv_BWD = np.mean(self.I_BWD, axis=0)
-                print('I FWD and BWD found')
+        if single_point_spectra:
+            self.I = self.I
         else:
-                print('I only FWD found')
+            self.I = ensure_square(self.I)[:, ::-1, ::-1][self.order]
+            self.iv = np.mean(self.I,  axis=0)
+            
+            if match_channel('LINECurrent', i+1):
+                if _make_attr(self, 'I_BWD', [i+1], 'data'):
+                    self.I_BWD = ensure_square(self.I_BWD)[:, ::-1, ::-1][self.order]
+                    self.iv_BWD = np.mean(self.I_BWD, axis=0)
+                    print('I FWD and BWD found')
+            else:
+                    print('I only FWD found')
     else:
         print('ERR: Current not found')
     
