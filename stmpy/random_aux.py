@@ -1490,8 +1490,8 @@ def plot_LIY_groups_at_energy_with_binmap(
     if k_ref < 0 or k_ref >= nE_ref:
         raise IndexError("Reference energy index out of range")
 
-    fig, (ax0, ax1) = plt.subplots(
-        1, 2, figsize=(10, 4), gridspec_kw={"width_ratios": [1.3, 1.0]}
+    fig, (ax0, ax2, ax1) = plt.subplots(
+        1, 3, figsize=(15, 4), gridspec_kw={"width_ratios": [1.3, 1.0, 1.0]}
     )
 
     # --- colors for groups (same for lines and map) ---
@@ -1513,10 +1513,16 @@ def plot_LIY_groups_at_energy_with_binmap(
             label=f"Bin {g+1}",
         )
 
+        ax2.plot(en, spec - LIY_grouped[k_ref, :, 0], color=colors[g], lw=linewidth, alpha=alpha)
+
     ax0.set_xlabel("Bias (V)")
     ax0.set_ylabel("dI/dV (a.u.)")
     ax0.set_title(f"Reference bias = {en[k_ref]:.3g} V")
     ax0.legend(fontsize=10, frameon=False)
+    ax2.set_xlabel("Bias (V)")
+    ax2.set_ylabel("dI/dV (a.u.) - Bin 1")
+    ax2.set_title("Same spectra, shifted to Bin 1 baseline")
+    ax2.legend(fontsize=10, frameon=False)
 
     # --- bin map panel ---
     bm = bin_maps[k_ref]  # (Ny, Nx) with 0..n_groups-1 or -1
@@ -1540,7 +1546,7 @@ def plot_LIY_groups_at_energy_with_binmap(
     cbar.set_label("Bin # (low → high percentile)")
 
     fig.tight_layout()
-    return fig, (ax0, ax1)
+    return fig, (ax0, ax2, ax1)
     
 def plot_LIY_groups_at_energy(
     en,
