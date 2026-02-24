@@ -4090,7 +4090,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 def angle_average_autocorr(C, center=None, dr=1.0, rmax=None,
-                           normalize=True, subtract_floor=False,
+                           normalize=False, subtract_floor=False,
                            return_counts=False, show=True):
     """
     Compute and (optionally) plot the angle-averaged autocorrelation C(r).
@@ -4174,7 +4174,6 @@ def angle_average_autocorr(C, center=None, dr=1.0, rmax=None,
         axs[1].set_xlabel("radius r (pixels)")
         axs[1].set_ylabel("angle-avg C(r)" + (" / C(0)" if normalize else ""))
         axs[1].set_title("Angle-averaged decay")
-        axs[1].grid(True, alpha=0.3)
         plt.show()
 
     if return_counts:

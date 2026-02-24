@@ -1150,17 +1150,20 @@ def cross_correlation_2d_plot(
     # Plot (optional)
     # --------------------
     if plot:
-        fig, axs = plt.subplots(1, 4, figsize=(17, 4), constrained_layout=True)
+        fig, axs = plt.subplots(1, 4, figsize=(14, 4), constrained_layout=True)
 
         im0 = axs[0].imshow(A, origin="lower", cmap=stmpy.cm.Blues_r, interpolation='none')
         axs[0].set_title(f"{titleA} ({'high-res' if high_res_label=='A' else 'resampled'})")
 
-        plt.colorbar(im0, ax=axs[0], fraction=0.046, pad=0.04)
+        # plt.colorbar(im0, ax=axs[0], fraction=0.046, pad=0.04)
+        stmpy.image.add_colorbar(ax=axs[0], loc=0, label='Topography (m)', fs=8,pad=0.1)
 
         im1 = axs[1].imshow(B, origin="lower", cmap=stmpy.cm.Blues_r, interpolation='none')
         axs[1].set_title(f"{titleB} ({'high-res' if high_res_label=='B' else 'resampled'})")
 
-        plt.colorbar(im1, ax=axs[1], fraction=0.046, pad=0.04)
+        stmpy.image.add_colorbar(ax=axs[1], loc=0, label='Topography (m)', fs=8,pad=0.1)
+
+        # plt.colorbar(im1, ax=axs[1], fraction=0.046, pad=0.04)
 
         vmax = np.nanmax(np.abs(C))
         norm = TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
@@ -1174,13 +1177,16 @@ def cross_correlation_2d_plot(
         axs[2].axhline(0, ls="--", c="gray")
         axs[2].axvline(0, ls="--", c="gray")
         axs[2].set_title(f"peak={peak_value:.3f} at {np.array(iy)}, {np.array(ix)}, center={central_value:.3f}\n")
-        axs[2].set_xlabel("dx (pixels)")
+        # axs[2].set_xlabel("dx (pixels)")
         axs[2].set_ylabel("dy (pixels)")
         if xlim is not None:
             axs[2].set_xlim(xlim)
         if ylim is not None:
             axs[2].set_ylim(ylim)
-        plt.colorbar(im2, ax=axs[2], fraction=0.046, pad=0.04)
+        # no xlabels and ticks
+        axs[2].set_xticks([])
+        stmpy.image.add_colorbar(ax=axs[2], loc=0, label='Correlation', fs=8,pad=0.1)
+        # plt.colorbar(im2, ax=axs[2], fraction=0.046, pad=0.04, )
         
         x = np.asarray(A).ravel()
         y = np.asarray(B).ravel()
@@ -1491,7 +1497,7 @@ def plot_LIY_groups_at_energy_with_binmap(
         raise IndexError("Reference energy index out of range")
 
     fig, (ax0, ax2, ax1) = plt.subplots(
-        1, 3, figsize=(15, 4), gridspec_kw={"width_ratios": [1.3, 1.0, 1.0]}
+        1, 3, figsize=(12, 4), gridspec_kw={"width_ratios": [1, 1.0, 1.0]}
     )
 
     # --- colors for groups (same for lines and map) ---
@@ -1518,11 +1524,11 @@ def plot_LIY_groups_at_energy_with_binmap(
     ax0.set_xlabel("Bias (V)")
     ax0.set_ylabel("dI/dV (a.u.)")
     ax0.set_title(f"Reference bias = {en[k_ref]:.3g} V")
-    ax0.legend(fontsize=10, frameon=False)
+    # ax0.legend(fontsize=10, frameon=False)
     ax2.set_xlabel("Bias (V)")
     ax2.set_ylabel("dI/dV (a.u.) - Bin 1")
     ax2.set_title("Same spectra, shifted to Bin 1 baseline")
-    ax2.legend(fontsize=10, frameon=False)
+    # ax2.legend(fontsize=10, frameon=False)
 
     # --- bin map panel ---
     bm = bin_maps[k_ref]  # (Ny, Nx) with 0..n_groups-1 or -1
@@ -1546,7 +1552,7 @@ def plot_LIY_groups_at_energy_with_binmap(
     cbar.set_label("Bin # (low → high percentile)")
 
     fig.tight_layout()
-    return fig, (ax0, ax2, ax1)
+    return fig, (ax0, ax2, ax1), bm_masked
     
 def plot_LIY_groups_at_energy(
     en,
