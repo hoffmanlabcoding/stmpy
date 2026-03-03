@@ -165,7 +165,9 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                              colorbar_range_ps=None,
                              add_label=True,
                              sym=None,
-                             savepath=None, savename=None, make_plots=True, show=True, return_figs=False, silent=True, RHK_format=True):
+                             savepath=None, 
+                             savepath2=None,
+                             savename=None, make_plots=True, show=True, return_figs=False, silent=True, RHK_format=True):
 
     scan_size = data.scan_info['scan_size']  # in nm
     n_pixels = data.scan_info['n_pixels']    
@@ -325,6 +327,8 @@ def add_corrections_and_plot(data, dos_map: bool = False,
     if savename is not None:
         savename = data.info_str + "_" + savename.replace(".sm4", "") +  ".pdf"
         fig_topo.savefig(savepath+'/'+savename)
+        if savepath2 is not None:
+            fig_topo.savefig(savepath2+'/'+savename)
         if not silent:
             print(f"Saved topo figure to {savepath+'/'+savename}")
 
@@ -1039,7 +1043,7 @@ def plot_rk_space(data, ens=None):
         stmpy.image.add_scale_bar(5, data.scan_info['scan_size'], data.scan_info['n_pixels'], fs=12, pad=0.1, ax=ax)
 
 
-def plot_histogram(data, title='Histogram of IV at en = 1.3', xlabel='I (pA)', xlim=None):
+def plot_histogram(data, title='Histogram', xlabel='I (pA)', xlim=None):
     plt.figure(figsize=(5, 3))
     plt.hist(data, bins=50, alpha=0.85, edgecolor='none')
     plt.xlabel(xlabel)
@@ -1506,6 +1510,7 @@ def plot_LIY_groups_at_energy_with_binmap(
     disc_cmap = ListedColormap(colors)
 
     # --- spectra panel ---
+    specs = LIY_grouped[k_ref]  # (nE, n_groups)
     for g in range(n_groups):
         spec = LIY_grouped[k_ref, :, g]
         if np.all(np.isnan(spec)):
@@ -1552,7 +1557,7 @@ def plot_LIY_groups_at_energy_with_binmap(
     cbar.set_label("Bin # (low → high percentile)")
 
     fig.tight_layout()
-    return fig, (ax0, ax2, ax1), bm_masked
+    return fig, (ax0, ax2, ax1), bm_masked, specs
     
 def plot_LIY_groups_at_energy(
     en,
