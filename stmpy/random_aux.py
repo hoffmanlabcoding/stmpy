@@ -194,17 +194,21 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                 data.FZ_BWD_ls_s = dfc.sym(data.FZ_BWD_ls, sym)
             else:
                 fig_topo, ax_topo = plt.subplots(2, 7, figsize=(23, 10))
+            ax_topo_ls_FWD = ax_topo[0,4]
+            ax_topo_ps_FWD = ax_topo[0,3]
+            ax_topo_ls_BWD = ax_topo[1,4]
+            ax_topo_ps_BWD = ax_topo[1,3]
             ax_topo[0,0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,0].set_title('Raw Z')
             ax_topo[0,1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,1].set_title('Global Corrected Z')
             ax_topo[0,2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,2].set_title('Local Corrected Z')
-            ax_topo[0,3].imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,3].set_title('Line Subtracted Z')
-            ax_topo[0,4].imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,4].set_title('Plane Subtracted Z')
+            ax_topo_ls_FWD.imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo_ls_FWD.set_title('Line Subtracted Z')
+            ax_topo_ps_FWD.imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo_ps_FWD.set_title('Plane Subtracted Z')
         
             ax_topo[1,0].imshow(data.Z_BWD,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,0].set_title('Raw Z BWD')
             ax_topo[1,1].imshow(data.Z_BWD_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,1].set_title('Global Corrected Z BWD')
             ax_topo[1,2].imshow(data.Z_BWD_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,2].set_title('Local Corrected Z BWD')
-            ax_topo[1,3].imshow(data.Z_BWD_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range, interpolation='none'); ax_topo[1,3].set_title('Line Subtracted Z BWD')
-            ax_topo[1,4].imshow(data.Z_BWD_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps, interpolation='none'); ax_topo[1,4].set_title('Plane Subtracted Z BWD')
+            ax_topo_ls_BWD.imshow(data.Z_BWD_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range, interpolation='none'); ax_topo_ls_BWD.set_title('Line Subtracted Z BWD')
+            ax_topo_ps_BWD.imshow(data.Z_BWD_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps, interpolation='none'); ax_topo_ps_BWD.set_title('Plane Subtracted Z BWD')
 
             for i in range(2):
                 for j in range(7):

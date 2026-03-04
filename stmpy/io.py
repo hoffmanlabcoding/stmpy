@@ -939,6 +939,7 @@ def load_sm4(filePath, single_point_spectra=False):
         raise ModuleNotFoundError(msg)
     
     f = sm4.load_sm4(filePath)
+
     self = Spy()
     self.info = {}
     self.info = f.print_info()
@@ -962,8 +963,6 @@ def load_sm4(filePath, single_point_spectra=False):
         
     def getf(channel):
         res = 100
-        # print('label is')
-        # print(label)
         for key in label: 
             # print(key, '---', label[key])
             if(label[key] == channel): 
@@ -1004,22 +1003,23 @@ def load_sm4(filePath, single_point_spectra=False):
     if liy == 100:
         liy = getf('LINELIA Current')
     
-    
     i = getf('LINECurrent')
     z = getf('IMAGETopography')
 
-    # print(liy, i, z)
+    print(liy, i, z)
 
     self.en = {}
     if liy < 100:
         self.en = f[liy].coords[1][1]
+    elif i < 100:
+        self.en = f[i].coords[1][1]
     else:
         self.en = f[0].coords[1][1]
-    
+ 
     self.order = np.argsort(self.en)
+
     self.en = self.en[self.order]
-    
-    # print(dir(self))    
+     
 
     if _make_attr(self, 'LIY', [liy], 'data'):
         if single_point_spectra:
@@ -1041,6 +1041,18 @@ def load_sm4(filePath, single_point_spectra=False):
     else:
         print('ERR: LIY channel not found')
     
+    if _make_attr(self, 'Z', [z], 'data'):
+        self.Z = self.Z[::-1, ::-1]
+        if match_channel('IMAGETopography', z+1):
+            if _make_attr(self, 'Z_BWD', [z+1], 'data'):
+                self.Z_BWD = self.Z_BWD[::-1, ::-1]
+
+                print('Z FWD and BWD found')
+        else:
+            print('Z only FWD found')
+    else:
+        print('ERR: Z channel not found')
+
 
     if _make_attr(self, 'I', [i], 'data'):
         if single_point_spectra:
@@ -1060,17 +1072,7 @@ def load_sm4(filePath, single_point_spectra=False):
         print('ERR: Current not found')
     
 
-    if _make_attr(self, 'Z', [z], 'data'):
-        self.Z = self.Z[::-1, ::-1]
-        if match_channel('IMAGETopography', z+1):
-            if _make_attr(self, 'Z_BWD', [z+1], 'data'):
-                self.Z_BWD = self.Z_BWD[::-1, ::-1]
-
-                print('Z FWD and BWD found')
-        else:
-            print('Z only FWD found')
-    else:
-        print('ERR: Z channel not found')
+    
     
     n_pixels = self.header[0]['Xsize'] 
     scan_size = np.abs(self.header[0]['Xscale']*n_pixels*1e9) # in nm
@@ -1094,161 +1096,6 @@ def load_sm4(filePath, single_point_spectra=False):
 
     return self
 
-# def load_sm4(filePath):
-    ''' Load RHK SM4 files into python.
-
-    Inputs:
-        filePath- Required : Name of the file
-        
-    Returns:
-        self.info     - information of the pages
-        self.header   - details of the pages
-        self.data     - all the data from all of the pages
-        self.en       - x axis for the spectropscopy data
-        self.Z        - Topography of the data (first occurrence)
-        self.Z_BWD    - Topography of the data (second occurrence only if immediately after first)
-        self.I        - Spectropscopy of the current data (first occurrence)
-        self.I_BWD    - (optional) second occurrence immediately after first
-        self.iv       - Average of the current spectroscopy data (from first occurrence)
-        self.LIY      - Spectropscopy of the didv data (first occurrence)
-        self.LIY_BWD  - (optional) second occurrence immediately after first
-        self.didv     - Average of the didv spectroscopy data (from first occurrence)
-        self.didvStd  - Std over pixels of the didv spectroscopy data (from first occurrence)
-   
-    History:
-        2020-07-15  - WT : Initial commit.
-        2022-03-02  - KH : Include try/except for missing RHK-SM4 pkg.
-        2025-09-26  - ZM : Fix LIY name variations & dimension fix.
-        2025-09-29  - ZM : Add scan_info.
-        2025-09-29  - YOU: Save first occurrence as primary; if next page is the
-                           same channel, save as <attr>_BWD.
-    '''
-    try: 
-        import rhk_sm4.rhk_sm4 as sm4
-    except ModuleNotFoundError:
-        msg = """
-        RHK-SM4 package not found. 
-        Install the RHK-SM4 package to use this loader function.
-        
-        Installation details can be found under: 
-            https://github.com/w24729695/RHK-SM4
-        """
-        raise ModuleNotFoundError(msg)
-    
-    f = sm4.load_sm4(filePath)
-    self = Spy()
-
-    # --- Basic info / raw collections
-    self.info = f.print_info()
-    name = self.info.iloc[:, 0].to_numpy()            # e.g., "IMAGETopography", "LINELIA current"
-    it   = self.info.iloc[:, 1].to_numpy()            # e.g., "DATA_..."
-    namef = np.char.strip(it.astype(str), 'DATA_')
-    names = list(namef + name)                        # page labels in order
-
-    self.data = {ix: f[ix].data for ix in range(len(f))}
-    self.header = {ix: f[ix].attrs for ix in range(len(f))}
-
-    # --- Helpers
-    def getf(channel):
-        """first index of exact label match, else 100 sentinel"""
-        for k, lbl in enumerate(names):
-            if lbl == channel:
-                return k
-        return 100
-
-    def normalize_label(lbl: str) -> str:
-        """remove fwd/bwd/forward/backward tokens; lowercase+compact for robust compare"""
-        base = re.sub(r'\b(fwd|bwd|forward|backward)\b', '', lbl, flags=re.I)
-        return re.sub(r'\s+', ' ', base).strip().lower()
-
-    def immediate_second(idx: int) -> int or None:
-        """if next page exists and is the 'same' channel (by normalized label)"""
-        if 0 <= idx < len(names) - 1:
-            if normalize_label(names[idx + 1]) == normalize_label(names[idx]):
-                return idx + 1
-        return None
-
-    def ensure_square(data, order='C'):
-        arr = np.asarray(data)
-        if arr.ndim == 2:
-            n_pixels_flat, depth = arr.shape
-            s = int(np.sqrt(n_pixels_flat))
-            if s * s != n_pixels_flat:
-                raise ValueError(f"First dim {n_pixels_flat} is not a perfect square")
-            data = arr.reshape(s, s, depth, order=order)
-            data = np.moveaxis(data, -1, 0)   # (s, s, depth) -> (depth, s, s)
-            return data
-        raise ValueError(f"data must be 2D array of (npx^2, depth); got {arr.ndim}D")
-
-    # --- Locate canonical channels
-    liy = getf('LINELIA current')  # allow common variant
-    if liy == 100:
-        liy = getf('LINELIA Current')
-    i   = getf('LINECurrent')
-    z   = getf('IMAGETopography')
-
-    # --- Energy axis (from LIY if available, else from first page coords)
-    if liy < 100:
-        self.en = f[liy].coords[1][1]
-    else:
-        self.en = f[0].coords[1][1]
-
-    # --- LIY (primary) + optional LIY_BWD if immediate neighbor matches
-    if liy < 100:
-        self.LIY = ensure_square(self.data[liy])
-        self.didv = np.mean(self.LIY, axis=1)    # average over pixels -> per-energy (axis 0 is energy)
-        self.didvStd = np.std(self.LIY, axis=1)
-
-        liy2 = immediate_second(liy)
-        if liy2 is not None:
-            # Store the BWD copy; no extra stats unless you want them:
-            self.LIY_BWD = ensure_square(self.data[liy2])
-    else:
-        print('ERR: LIY channel not found')
-
-    # --- I (primary) + optional I_BWD
-    if i < 100:
-        self.I = ensure_square(self.data[i])
-        self.iv = np.mean(self.I, axis=1)        # per-energy average current
-
-        i2 = immediate_second(i)
-        if i2 is not None:
-            self.I_BWD = ensure_square(self.data[i2])
-    else:
-        print('ERR: Current not found')
-
-    # --- Z (primary) + optional Z_BWD
-    if z < 100:
-        self.Z = self.data[z]
-        z2 = immediate_second(z)
-        if z2 is not None:
-            self.Z_BWD = self.data[z2]
-    else:
-        print('ERR: Z channel not found')
-
-    # --- Scan metadata (tie to the primary topo page if available, else first page)
-    meta_idx = z if z < 100 else 0
-    try:
-        n_pixels   = self.header[meta_idx]['Xsize']
-        scan_size  = np.abs(self.header[meta_idx]['Xscale'] * n_pixels * 1e9) # nm
-        set_current = self.header[meta_idx]['Current'] * 1e12                 # pA
-        set_voltage = self.header[meta_idx]['Bias']                           # V
-    except Exception:
-        # Fallback to header[0] if attributes differ across pages or keys missing
-        n_pixels   = self.header[0].get('Xsize', 0)
-        scan_size  = np.abs(self.header[0].get('Xscale', 0) * n_pixels * 1e9)
-        set_current = self.header[0].get('Current', 0) * 1e12
-        set_voltage = self.header[0].get('Bias', 0)
-
-    self.scan_info = {
-        'n_pixels': n_pixels,
-        'scan_size': scan_size,
-        'set_current': set_current,
-        'set_voltage': set_voltage,
-    }
-    self.info_str = f"{set_voltage:.2f}V_{set_current:.1f}pA_{scan_size:.0f}nm_{n_pixels}x{n_pixels}"
-
-    return self
 
 def _read_Cornell_header(fid):
     def hread(r_offset, start, dtype, length):
