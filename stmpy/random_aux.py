@@ -33,7 +33,9 @@ def plot_FFT_data(data,
                   center='mean',             # 'mean', 0, or a numeric value
                   prc=None,                  # e.g. (1, 99) to use percentiles instead of std
                   ax=None,
-                  add_colorbar=False):
+                  add_colorbar=False,
+                  make_circle=None,
+                  savename=None):
     
     arr = np.asarray(data)
     if arr.ndim != 2:
@@ -92,6 +94,13 @@ def plot_FFT_data(data,
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_aspect('equal')
+    if make_circle is not None:
+        cx, cy = arr.shape[1]//2, arr.shape[0]//2
+        print(cx, cy, make_circle)
+        circ = patches.Circle((cx, cy), make_circle, fill=False, edgecolor='cyan', lw=1.5)
+        ax.add_patch(circ)
+    if savename is not None:
+        fig.savefig(savename)
     return fig, ax
 
 def _process_pipeline(Z, window_type='hanning'):
@@ -201,8 +210,8 @@ def add_corrections_and_plot(data, dos_map: bool = False,
             ax_topo[0,0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,0].set_title('Raw Z')
             ax_topo[0,1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,1].set_title('Global Corrected Z')
             ax_topo[0,2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,2].set_title('Local Corrected Z')
-            ax_topo_ls_FWD.imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo_ls_FWD.set_title('Line Subtracted Z')
-            ax_topo_ps_FWD.imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo_ps_FWD.set_title('Plane Subtracted Z')
+            ax_topo_ls_FWD.imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range, interpolation='none'); ax_topo_ls_FWD.set_title('Line Subtracted Z')
+            ax_topo_ps_FWD.imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps, interpolation='none'); ax_topo_ps_FWD.set_title('Plane Subtracted Z')
         
             ax_topo[1,0].imshow(data.Z_BWD,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,0].set_title('Raw Z BWD')
             ax_topo[1,1].imshow(data.Z_BWD_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,1].set_title('Global Corrected Z BWD')
@@ -233,7 +242,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                             stmpy.image.add_colorbar(ax=ax_topo[i,j], label='Topography (m)', fs=8)
                         if add_label:
                             stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i,j], fs=8)
-
+            print(k_crop_n)
             plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[0,5], add_colorbar=add_colorbar)
             plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[0,6], add_colorbar=add_colorbar)
             plot_FFT_data(data.FZ_BWD_ls, k_crop_n=k_crop_n, ax=ax_topo[1,5], add_colorbar=add_colorbar)
@@ -245,7 +254,6 @@ def add_corrections_and_plot(data, dos_map: bool = False,
     else:
         if make_plots:
             fig_topo, ax_topo = plt.subplots(1, 7, figsize=(23, 5))
-
             ax_topo[0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0].set_title('Raw Z')
             ax_topo[1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1].set_title('Global Corrected Z')
             ax_topo[2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[2].set_title('Local Corrected Z')
@@ -1071,6 +1079,8 @@ def cross_correlation_2d_plot(
     anti_aliasing=True,
     xlim=None,
     ylim=None,
+    scalebar=None,
+    savename=None
 ):
     A = np.asarray(A, float)
     B = np.asarray(B, float)
@@ -1160,13 +1170,13 @@ def cross_correlation_2d_plot(
     if plot:
         fig, axs = plt.subplots(1, 4, figsize=(14, 4), constrained_layout=True)
 
-        im0 = axs[0].imshow(A, origin="lower", cmap=stmpy.cm.Blues_r, interpolation='none')
+        axs[0].imshow(A, origin="lower", cmap=stmpy.cm.Blues_r, interpolation='none')
         axs[0].set_title(f"{titleA} ({'high-res' if high_res_label=='A' else 'resampled'})")
 
         # plt.colorbar(im0, ax=axs[0], fraction=0.046, pad=0.04)
         stmpy.image.add_colorbar(ax=axs[0], loc=0, label='Topography (m)', fs=8,pad=0.1)
 
-        im1 = axs[1].imshow(B, origin="lower", cmap=stmpy.cm.Blues_r, interpolation='none')
+        axs[1].imshow(B, origin="lower", cmap=stmpy.cm.Blues_r, interpolation='none')
         axs[1].set_title(f"{titleB} ({'high-res' if high_res_label=='B' else 'resampled'})")
 
         stmpy.image.add_colorbar(ax=axs[1], loc=0, label='Topography (m)', fs=8,pad=0.1)
@@ -1177,10 +1187,13 @@ def cross_correlation_2d_plot(
         norm = TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
         extent = [-cx, cx, -cy, cy]
 
-        im2 = axs[2].imshow(
+        axs[2].imshow(
             C, origin="lower", extent=extent,
             cmap=stmpy.cm.jason_r, norm=norm, interpolation='none'
         )
+        if scalebar is not None:
+            for ax_ in axs[:3]:
+                stmpy.image.add_scale_bar(scalebar[0], scalebar[1], scalebar[2], fs=8, pad=0.1, ax=ax_, color='black')
         axs[2].plot(dx, dy, "ko", ms=3)
         axs[2].axhline(0, ls="--", c="gray")
         axs[2].axvline(0, ls="--", c="gray")
@@ -1211,7 +1224,6 @@ def cross_correlation_2d_plot(
             denom = np.sqrt((xzc**2).sum() * (yzc**2).sum())
             r = float((xzc * yzc).sum() / denom) if denom > 0 else np.nan
 
-
         axs[3].scatter(xm, ym, s=10, alpha=0.7)
         axs[3].set_xlabel(titleA)
         axs[3].set_ylabel(titleB)
@@ -1223,10 +1235,10 @@ def cross_correlation_2d_plot(
                 axs[3].plot(xs, slope * xs + intercept, linewidth=2)
             except Exception:
                 pass
-
         axs[3].set_title(f"Pearson r = {r:.3f}" if np.isfinite(r) else "Pearson r is undefined")
-
-        plt.show()
+        
+        if savename is not None:
+            fig.savefig(savename)
 
     return C, (dy, dx), peak_value, central_value
 
@@ -1546,7 +1558,7 @@ def plot_LIY_groups_at_energy_with_binmap(
     im = ax1.imshow(
         bm_masked,
         cmap=disc_cmap,
-        interpolation="nearest",
+        interpolation="none",
         vmin=0 if vmin is None else vmin,
         vmax=(n_groups - 1) if vmax is None else vmax,
         origin="lower",
@@ -1676,6 +1688,25 @@ def model_center_plus_two_pairs(
 
     return y + offset
 
+def model_0center_plus_two_pairs(
+    x,
+    A0, gamma0,
+    A1, delta1, gamma1,
+    A2, delta2, gamma2,
+    offset
+):
+    y = lorentz(x, A0, 0, gamma0)
+
+    # pair 1
+    y += lorentz(x, A1, 0 + delta1, gamma1)
+    y += lorentz(x, A1, 0 - delta1, gamma1)
+
+    # pair 2
+    y += lorentz(x, A2, 0 + delta2, gamma2)
+    y += lorentz(x, A2, 0 - delta2, gamma2)
+
+    return y + offset
+
 
 # ------------------------
 # fitting + plotting
@@ -1686,7 +1717,9 @@ def fit_center_and_two_pairs(
     p0,
     bounds=None,
     plot=False,
-    maxfev=20000
+    maxfev=20000,
+    yscale_log=False,
+    return_lines=False,
 ):
     """
     Fit a central Lorentzian + two symmetric Lorentzian pairs.
@@ -1722,34 +1755,40 @@ def fit_center_and_two_pairs(
     # plotting
     if plot:
         x0, A0, g0, A1, d1, g1, A2, d2, g2, off = popt
+        xs = np.linspace(x.min(), x.max(), 1000)
+        y_fits = model_center_plus_two_pairs(xs, *popt)
 
-        y_fit = model_center_plus_two_pairs(x, *popt)
-
-        y_center = lorentz(x, A0, x0, g0) + off
-        y_pair1 = (
-            lorentz(x, A1, x0 + d1, g1)
-            + lorentz(x, A1, x0 - d1, g1)
+        y_centers = lorentz(xs, A0, x0, g0) + off
+        y_pair1s = (
+            lorentz(xs, A1, x0 + d1, g1)
+            + lorentz(xs, A1, x0 - d1, g1)
         )
-        y_pair2 = (
-            lorentz(x, A2, x0 + d2, g2)
-            + lorentz(x, A2, x0 - d2, g2)
+        y_pair2s = (
+            lorentz(xs, A2, x0 + d2, g2)
+            + lorentz(xs, A2, x0 - d2, g2)
         )
 
-        plt.figure(figsize=(6, 3))
+        plt.figure(figsize=(6, 6))
         plt.plot(x, y, "k.", ms=2, label="data")
-        plt.plot(x, y_fit, "r-", lw=1, label="total fit")
-        plt.plot(x, y_center, "--", lw=1, label="central Lorentzian")
-        plt.plot(x, y_pair1, "--", lw=1, label="pair 1")
-        plt.plot(x, y_pair2, "--", lw=1, label="pair 2")
+        plt.plot(xs, y_fits, "r-", lw=1, label="total fit")
+        plt.plot(xs, y_centers, "--", lw=1, label="central Lorentzian")
+        plt.plot(xs, y_pair1s, "--", lw=1, label="pair 1")
+        plt.plot(xs, y_pair2s, "--", lw=1, label="pair 2")
 
         plt.xlabel("x")
         plt.ylabel("intensity")
         plt.legend()
         plt.tight_layout()
 
-
+        if yscale_log:
+            plt.yscale("log")
         delta1 = popt[4]
         delta2 = popt[7]
+        # plot x = delta1 and x = delta2 lines
+        plt.axvline(delta1, ls="--", color="blue", label="delta1")
+        plt.axvline(-delta1, ls="--", color="blue")
+        plt.axvline(delta2, ls="--", color="orange", label="delta2")
+        plt.axvline(-delta2, ls="--", color="orange")
         delta1_err = np.sqrt(pcov[4, 4])
         delta2_err = np.sqrt(pcov[7, 7])
         # ratio
@@ -1759,7 +1798,102 @@ def fit_center_and_two_pairs(
         )
         plt.title(f"charge ordering period/lattice constant = {ratio:.2f} ± {ratio_err:.2f}")
         plt.show()
-    return popt, pcov, param_names
+        # Fitted lines
+        if return_lines:
+            return popt, pcov, param_names, x, xs, y_fits, y_centers, y_pair1s, y_pair2s
+    return popt, pcov, param_names, 
+
+def fit_0center_and_two_pairs(
+    x,
+    y,
+    p0,
+    bounds=None,
+    plot=False,
+    maxfev=20000,
+    yscale_log=False,
+    return_lines=False,
+):
+    """
+    Fit a central Lorentzian + two symmetric Lorentzian pairs.
+
+    Parameter order:
+      [ 
+        A0, gamma0,
+        A1, delta1, gamma1,
+        A2, delta2, gamma2,
+        offset ]
+    """
+
+    param_names = [
+        "A0", "gamma0",
+        "A1", "delta1", "gamma1",
+        "A2", "delta2", "gamma2",
+        "offset"
+    ]
+
+    # fit
+    if bounds is None:
+        popt, pcov = curve_fit(
+            model_0center_plus_two_pairs,
+            x, y, p0=p0, maxfev=maxfev
+        )
+    else:
+        popt, pcov = curve_fit(
+            model_0center_plus_two_pairs,
+            x, y, p0=p0, bounds=bounds, maxfev=maxfev
+        )
+
+    # plotting
+    if plot:
+        A0, g0, A1, d1, g1, A2, d2, g2, off = popt
+        xs = np.linspace(x.min(), x.max(), 1000)
+        y_fits = model_0center_plus_two_pairs(xs, *popt)
+
+        y_centers = lorentz(xs, A0, 0, g0) + off
+        y_pair1s = (
+            lorentz(xs, A1, 0 + d1, g1)
+            + lorentz(xs, A1, 0 - d1, g1)
+        )
+        y_pair2s = (
+            lorentz(xs, A2, 0 + d2, g2)
+            + lorentz(xs, A2, 0 - d2, g2)
+        )
+
+        plt.figure(figsize=(6, 6))
+        plt.plot(x, y, "k.", ms=2, label="data")
+        plt.plot(xs, y_fits, "r-", lw=1, label="total fit")
+        plt.plot(xs, y_centers, "--", lw=1, label="central Lorentzian")
+        plt.plot(xs, y_pair1s, "--", lw=1, label="pair 1")
+        plt.plot(xs, y_pair2s, "--", lw=1, label="pair 2")
+
+        plt.xlabel("x")
+        plt.ylabel("intensity")
+        plt.legend()
+        plt.tight_layout()
+
+        if yscale_log:
+            plt.yscale("log")
+        delta1 = popt[3]
+        delta2 = popt[6]
+        # plot x = delta1 and x = delta2 lines
+        plt.axvline(delta1, ls="--", color="blue", label="delta1")
+        plt.axvline(-delta1, ls="--", color="blue")
+        plt.axvline(delta2, ls="--", color="orange", label="delta2")
+        plt.axvline(-delta2, ls="--", color="orange")
+        delta1_err = np.sqrt(pcov[4, 4])
+        delta2_err = np.sqrt(pcov[7, 7])
+        # ratio
+        ratio = delta2/delta1
+        ratio_err = ratio * np.sqrt(
+            (delta1_err / delta1)**2 + (delta2_err / delta2)**2
+        )
+        plt.title(f"charge ordering period/lattice constant = {ratio:.2f} ± {ratio_err:.2f}")
+        plt.show()
+        # Fitted lines
+        if return_lines:
+            return popt, pcov, param_names, x, xs, y_fits, y_centers, y_pair1s, y_pair2s
+    return popt, pcov, param_names, 
+
 
 
 # --- Model: central + one symmetric pair + offset ---
@@ -1774,8 +1908,18 @@ def model_center_plus_one_pair(x,
     y += lorentz(x, A1, x0 - delta1, gamma1)
     return y + offset
 
+def model_0center_plus_one_pair(x,
+                              A0, gamma0,    # central Lorentzian
+                              A1, delta1, gamma1,  # symmetric pair at x0±delta1
+                              offset):       # constant background
+    y = lorentz(x, A0, 0, gamma0)
+    # symmetric pair
+    y += lorentz(x, A1, delta1, gamma1)
+    y += lorentz(x, A1, -delta1, gamma1)
+    return y + offset
+
 # --- Fit function with optional plotting ---
-def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_peaks=False, maxfev=20000):
+def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_peaks=False, maxfev=20000, ax=None, yscale_log=False):
     """
     Fit central Lorentzian + one symmetric Lorentzian pair + constant offset.
 
@@ -1808,22 +1952,22 @@ def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_p
         y_center = lorentz(x, A0, x0, g0) + off
         y_pair = lorentz(x, A1, x0 + d1, g1) + lorentz(x, A1, x0 - d1, g1)
 
-        plt.figure(figsize=(8,5))
-        plt.plot(x, y, 'k.', ms=4, label='data')
-        plt.plot(x, y_fit, 'r-', lw=2, label='total fit')
-        plt.plot(x, y_center, '--', lw=1.5, label='central Lorentzian (with offset)')
-        plt.plot(x, y_pair, '--', lw=2, label='symmetric pair (sum)')
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(8,5))
+        ax.plot(x, y, 'k.', ms=4, label='data')
+        ax.plot(x, y_fit, 'r-', lw=2, label='total fit')
+        ax.plot(x, y_center, '--', lw=1.5, label='central Lorentzian (with offset)')
+        ax.plot(x, y_pair, '--', lw=2, label='symmetric pair (sum)')
 
         if show_individual_peaks:
             y_plus = lorentz(x, A1, x0 + d1, g1) + 0.0
             y_minus = lorentz(x, A1, x0 - d1, g1) + 0.0
-            plt.plot(x, y_plus, '--', lw=1.2, label='pair: +peak')
-            plt.plot(x, y_minus, '--', lw=1.2, label='pair: -peak')
+            ax.plot(x, y_plus, '--', lw=1.2, label='pair: +peak')
+            ax.plot(x, y_minus, '--', lw=1.2, label='pair: -peak')
 
-        plt.xlabel('x')
-        plt.ylabel('intensity')
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
-
-    return popt, pcov, param_names, model_center_plus_one_pair
+        ax.set_xlabel('x')
+        ax.set_ylabel('intensity')
+        ax.legend()
+        if yscale_log:
+            ax.set_yscale('log')
+    return popt, pcov, param_names, model_center_plus_one_pair, ax

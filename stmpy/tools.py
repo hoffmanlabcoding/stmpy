@@ -6,6 +6,7 @@ import sys
 import numpy as np
 import os
 import matplotlib as mpl
+import matplotlib.colors as colors
 #import scipy.interpolate as sin  #this is a stupid name for this package...
 from scipy.interpolate import interp1d
 import scipy.optimize as opt
@@ -3045,30 +3046,19 @@ def cdw_intensity_map(data, Q, radius,
                       window="None", zeroDC=True, beta=1.0,
                       crop_n=0, show_option='absolute',
                       show=False,
-                      return_complement=False):
-    """
-    Extract CDW intensity (amplitude) map from a single FFT blob at +Q,
-    with optional visualization.
-
-    New:
-    ----
-    - Shows iFFT of the complement (the part NOT selected by the mask) when show=True.
-    - Optionally returns the complement map if return_complement=True.
-
-    Parameters
-    ----------
-    ... (same as before) ...
-    return_complement : bool
-        If True, also return the (H, W) array of the complement inverse-FFT map.
-    """
-
+                      colorbar_range_real=None,
+                      colorbar_range_fft=None,
+                      colorbar_fft_log_scale=False,      
+                      return_complement=False,
+                      savename=None,
+                      scalebar=None):
     img = np.asarray(data)
     if img.ndim != 2:
         raise ValueError("data must be a 2D array")
 
     H, W = img.shape
-    cx = (W - 1) / 2.0
-    cy = (H - 1) / 2.0
+    cx = W // 2
+    cy = H // 2
     qx, qy = float(Q[0]), float(Q[1])
 
     # -------------------------
@@ -3086,9 +3076,6 @@ def cdw_intensity_map(data, Q, radius,
     else:
         raise ValueError("method must be 'gaussian' or 'disk'")
 
-    # -------------------------
-    # FFT
-    # -------------------------
     F = stmpy.tools.fft(
         img,
         window=window,
@@ -3097,15 +3084,7 @@ def cdw_intensity_map(data, Q, radius,
         beta=beta,
         units="None"
     )
-
-    # -------------------------
-    # Filter +Q blob
-    # -------------------------
     Fq = F * mask
-
-    # -------------------------
-    # Complement (not-selected) in k-space
-    # -------------------------
     F_not = F * (1.0 - mask)
 
     # -------------------------
@@ -3146,65 +3125,89 @@ def cdw_intensity_map(data, Q, radius,
     if show:
         # layout: 2 rows x 3 cols
         fig, ax = plt.subplots(2, 3, figsize=(14, 8))
-
+        ax_original = ax[0, 0]  # for original image (full size)
+        ax_low = ax[0, 1]       
+        ax_high = ax[0, 2] 
+        ax_FFT_original = ax[1, 0]  # for FFT magnitude with selected blob
+        ax_FFT_low = ax[1, 1]  # for filtered FFT magnitude (selected blob)
+        ax_FFT_high = ax[1, 2]  # for complement FFT magnitude (not selected)
+     
         # (1) Original image
-        im0 = ax[0, 0].imshow(img, origin="lower", cmap=stmpy.cm.Blues_r)
-        ax[0, 0].set_title("Original")
-        ax[0, 0].set_xticks([]); ax[0, 0].set_yticks([])
-        plt.colorbar(im0, ax=ax[0, 0], fraction=0.046, pad=0.04)
+        im0 = ax_original.imshow(img, origin="lower", cmap=stmpy.cm.Blues_r, clim=colorbar_range_real, interpolation='none')
+        ax_original.set_title("Original")
+        ax_original.set_xticks([]); ax_original.set_yticks([])
+        plt.colorbar(im0, ax=ax_original, fraction=0.046, pad=0.04)
 
         # (2) FFT magnitude with circle
         fft_mag = np.abs(F)
-        clim = _percent_clim(fft_mag)
-        im1 = ax[0, 1].imshow(fft_mag, origin="lower", cmap=stmpy.cm.gray_r, clim=clim)
+        if colorbar_range_fft is not None:
+            clim = colorbar_range_fft
+        else:
+            clim = _percent_clim(fft_mag)
+        print("clim for FFT magnitude:", clim)
+        im1 = ax_FFT_original.imshow(fft_mag, origin="lower", cmap=stmpy.cm.gray_r, clim=clim, interpolation='none', norm=colors.LogNorm(vmin=clim[0], vmax=clim[1]) if colorbar_fft_log_scale else None)
         circ = patches.Circle((qx, qy), radius,
                                fill=False, ec="cyan", lw=1.5)
-        ax[0, 1].add_patch(circ)
-        ax[0, 1].set_title("FFT magnitude (+Q selected)")
-        ax[0, 1].set_xticks([]); ax[0, 1].set_yticks([])
-        plt.colorbar(im1, ax=ax[0, 1], fraction=0.046, pad=0.04)
+        print(qx, qy, radius, cx, cy)
+        ax_FFT_original.add_patch(circ)
+        ax_FFT_original.set_title("FFT magnitude (+Q selected)")
+        ax_FFT_original.set_xticks([]); ax_FFT_original.set_yticks([])
+        plt.colorbar(im1, ax=ax_FFT_original, fraction=0.046, pad=0.04)
+        # Logscale option for FFT colorbar
+    
         if crop_n > 0:
-            ax[0, 1].set_xlim(cx - crop_n, cx + crop_n)
-            ax[0, 1].set_ylim(cy - crop_n, cy + crop_n)
+            ax_FFT_original.set_xlim(cx - crop_n, cx + crop_n)
+            ax_FFT_original.set_ylim(cy - crop_n, cy + crop_n)
 
         # (3) Filtered FFT magnitude (selected blob)
         fft_filt_mag = np.abs(Fq)
-        clim = _percent_clim(fft_filt_mag)
-        im2 = ax[0, 2].imshow(fft_filt_mag, origin="lower", cmap=stmpy.cm.gray_r, clim=clim)
-        ax[0, 2].set_title("Filtered FFT (selected, after shift)" if shift_to_center
-                           else "Filtered FFT (selected)")
-        ax[0, 2].set_xticks([]); ax[0, 2].set_yticks([])
-        plt.colorbar(im2, ax=ax[0, 2], fraction=0.046, pad=0.04)
+        if colorbar_range_fft is not None:
+            clim = colorbar_range_fft
+        else:            
+            clim = _percent_clim(fft_filt_mag)
+        im2 = ax_FFT_low.imshow(fft_filt_mag, origin="lower", cmap=stmpy.cm.gray_r, clim=clim, interpolation='none', norm=colors.LogNorm(vmin=clim[0], vmax=clim[1]) if colorbar_fft_log_scale else None)
+        ax_FFT_low.set_title("Filtered FFT (selected, after shift)" if shift_to_center
+                              else "Filtered FFT (selected)")
+        ax_FFT_low.set_xticks([]); ax_FFT_low.set_yticks([])
+        plt.colorbar(im2, ax=ax_FFT_low, fraction=0.046, pad=0.04)
         if crop_n > 0:
-            ax[0, 2].set_xlim(cx - crop_n, cx + crop_n)
-            ax[0, 2].set_ylim(cy - crop_n, cy + crop_n)
+            ax_FFT_low.set_xlim(cx - crop_n, cx + crop_n)
+            ax_FFT_low.set_ylim(cy - crop_n, cy + crop_n)
 
         # (4) CDW intensity map (selected)
-        im3 = ax[1, 0].imshow(A, origin="lower", cmap=stmpy.cm.Blues_r)
-        ax[1, 0].set_title("CDW intensity |ψ(r)| (selected)")
-        ax[1, 0].set_xticks([]); ax[1, 0].set_yticks([])
-        plt.colorbar(im3, ax=ax[1, 0], fraction=0.046, pad=0.04)
+        im3 = ax_low.imshow(A, origin="lower", cmap=stmpy.cm.Blues_r, clim=colorbar_range_real, interpolation='none')
+        ax_low.set_title("Low freq")
+        ax_low.set_xticks([]); ax_low.set_yticks([])
+        plt.colorbar(im3, ax=ax_low, fraction=0.046, pad=0.04)
 
         # (5) Complement FFT magnitude (not selected)
         fft_not_mag = np.abs(F_not)
-        clim = _percent_clim(fft_not_mag)
-        im4 = ax[1, 1].imshow(fft_not_mag, origin="lower", cmap=stmpy.cm.gray_r, clim=clim)
-        ax[1, 1].set_title("FFT magnitude (complement)")
-        ax[1, 1].set_xticks([]); ax[1, 1].set_yticks([])
-        plt.colorbar(im4, ax=ax[1, 1], fraction=0.046, pad=0.04)
+        if colorbar_range_fft is not None:
+            clim = colorbar_range_fft
+        else:
+            clim = _percent_clim(fft_not_mag)
+        im4 = ax_FFT_high.imshow(fft_not_mag, origin="lower", cmap=stmpy.cm.gray_r, clim=clim, interpolation='none', norm=colors.LogNorm(vmin=clim[0], vmax=clim[1]) if colorbar_fft_log_scale else None)
+        ax_FFT_high.set_title("FFT magnitude (complement)")
+        ax_FFT_high.set_xticks([]); ax_FFT_high.set_yticks([])
+        plt.colorbar(im4, ax=ax_FFT_high, fraction=0.046, pad=0.04)
         if crop_n > 0:
-            ax[1, 1].set_xlim(cx - crop_n, cx + crop_n)
-            ax[1, 1].set_ylim(cy - crop_n, cy + crop_n)
+            ax_FFT_high.set_xlim(cx - crop_n, cx + crop_n)
+            ax_FFT_high.set_ylim(cy - crop_n, cy + crop_n)
 
         # (6) Complement iFFT map
-        im5 = ax[1, 2].imshow(A_not, origin="lower", cmap=stmpy.cm.Blues_r)
-        ax[1, 2].set_title("Complement map (iFFT of not-selected)")
-        ax[1, 2].set_xticks([]); ax[1, 2].set_yticks([])
-        plt.colorbar(im5, ax=ax[1, 2], fraction=0.046, pad=0.04)
+        im5 = ax_high.imshow(A_not, origin="lower", cmap=stmpy.cm.Blues_r, clim=colorbar_range_real, interpolation='none')
+        ax_high.set_title("High freq")
+        ax_high.set_xticks([]); ax_high.set_yticks([])
+        plt.colorbar(im5, ax=ax_high, fraction=0.046, pad=0.04)
+        if scalebar is not None:
+            for ax_ in [ax_original, ax_low, ax_high]:
+                stmpy.image.add_scale_bar(scalebar[0], scalebar[1], scalebar[2], ax = ax_, fs=10)
 
         plt.tight_layout()
         plt.show()
-
+        if savename is not None:
+            fig.savefig(savename)
+        
     if return_complement:
         return A, A_not
     else:
