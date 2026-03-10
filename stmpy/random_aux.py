@@ -176,6 +176,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                              sym=None,
                              savepath=None, 
                              savepath2=None,
+                             smooth_window=10,
                              savename=None, make_plots=True, show=True, return_figs=False, silent=True, RHK_format=True):
 
     scan_size = data.scan_info['scan_size']  # in nm
@@ -291,7 +292,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
         if not hasattr(data, 'LIY'):
             raise AttributeError("dos_map=True but `data.LIY` not found.")
         # Corrections on the full energy stack 
-        _process_pipeline_LIY(data, smooth_window=10, window_type='hanning')
+        _process_pipeline_LIY(data, smooth_window=smooth_window, window_type='hanning')
     
 
         # Mean over energy
@@ -486,7 +487,7 @@ def compute_shape_params(
         plot_rk_space(data, ens=[e0, e1, e2, e3, e4, e5])
         
 
-def smooth_LIY(LIY, window=5, axis=0, mode='reflect'):
+def smooth_LIY(LIY, window=10, axis=0, mode='reflect'):
     """
     Smooths the LIY data by a moving mean along the specified axis.
 
@@ -1919,7 +1920,7 @@ def model_0center_plus_one_pair(x,
     return y + offset
 
 # --- Fit function with optional plotting ---
-def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_peaks=False, maxfev=20000, ax=None, yscale_log=False):
+def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_peaks=False, maxfev=20000, ax=None, yscale_log=False, mask_values=None):
     """
     Fit central Lorentzian + one symmetric Lorentzian pair + constant offset.
 
@@ -1948,26 +1949,37 @@ def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_p
     # plotting
     if plot:
         x0, A0, g0, A1, d1, g1, off = popt
-        y_fit = model_center_plus_one_pair(x, *popt)
-        y_center = lorentz(x, A0, x0, g0) + off
-        y_pair = lorentz(x, A1, x0 + d1, g1) + lorentz(x, A1, x0 - d1, g1)
+        xs = np.linspace(x.min(), x.max(), 1000)
+        y_fit = model_center_plus_one_pair(xs, *popt)
+        y_center = lorentz(xs, A0, x0, g0) + off
+        y_pair = lorentz(xs, A1, x0 + d1, g1) + lorentz(xs, A1, x0 - d1, g1)
+
+        xplots = (xs-x0) / d1
+        xplot = (x-x0) / d1
+        if mask_values is None:
+            mask_values = (x.min()/d1, x.max()/d1)
+        mask = (xplot >= mask_values[0]) & (xplot <= mask_values[1])
+        masks = (xplots >= mask_values[0]) & (xplots <= mask_values[1])
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(8,5))
-        ax.plot(x, y, 'k.', ms=4, label='data')
-        ax.plot(x, y_fit, 'r-', lw=2, label='total fit')
-        ax.plot(x, y_center, '--', lw=1.5, label='central Lorentzian (with offset)')
-        ax.plot(x, y_pair, '--', lw=2, label='symmetric pair (sum)')
-
-        if show_individual_peaks:
-            y_plus = lorentz(x, A1, x0 + d1, g1) + 0.0
-            y_minus = lorentz(x, A1, x0 - d1, g1) + 0.0
-            ax.plot(x, y_plus, '--', lw=1.2, label='pair: +peak')
-            ax.plot(x, y_minus, '--', lw=1.2, label='pair: -peak')
+        ax.scatter(
+            xplot[mask], y[mask],
+            s=4,              # size (roughly similar to ms=4)
+            marker='o',
+            facecolors='none', # hollow
+            edgecolors='k',    # black outline
+            linewidths=0.8,
+            label='data'
+        )
+        ax.plot(xplots[masks], y_fit[masks], 'r-', lw=0.5, label='total fit')
+        ax.fill_between(xplots[masks], 0, y_center[masks],  color='gray', alpha=0.25, label='central Lorentzian')
+        ax.fill_between(xplots[masks], 0, y_pair[masks],  color='green', alpha=0.25, label='pair: +peak')
 
         ax.set_xlabel('x')
         ax.set_ylabel('intensity')
-        ax.legend()
+        # ax.legend()
+        ax.set_xlim(mask_values[0], mask_values[1])
         if yscale_log:
             ax.set_yscale('log')
     return popt, pcov, param_names, model_center_plus_one_pair, ax
