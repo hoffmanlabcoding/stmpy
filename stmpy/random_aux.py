@@ -1400,90 +1400,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
-def group_LIY_by_intensity_at_each_energy(
-    en, LIY, n_groups=10, use_nanmean=True, return_bin_maps=True
-):
-    """
-    Group pixels by LIY intensity at each reference energy, then average full spectra per group.
-
-    Returns:
-      en_sorted: (nE,)
-      LIY_grouped: (nE_ref, nE, n_groups)
-      bin_maps (optional): (nE_ref, Ny, Nx) with bin index per pixel, or -1 if invalid.
-    """
-    en = np.asarray(en)
-    LIY = np.asarray(LIY)
-
-    if LIY.ndim != 3:
-        raise ValueError("LIY must have shape (n_energy, Ny, Nx)")
-
-    nE, Ny, Nx = LIY.shape
-    if en.shape[0] != nE:
-        raise ValueError("en length must match LIY.shape[0]")
-
-    # ---- sort energies ----
-    order = np.argsort(en)
-    en_sorted = en[order]
-    LIY_sorted = LIY[order, :, :]
-
-    # ---- flatten pixels ----
-    Npix = Ny * Nx
-    LIY_flat = LIY_sorted.reshape(nE, Npix)  # (nE, Npix)
-
-    mean_fn = np.nanmean if use_nanmean else np.mean
-    LIY_grouped = np.full((nE, nE, n_groups), np.nan, dtype=float)
-
-    # bin map output
-    bin_maps = None
-    if return_bin_maps:
-        bin_maps = np.full((nE, Ny, Nx), -1, dtype=int)
-
-    edges_pct = np.linspace(0, 100, n_groups + 1)
-
-    for k_ref in range(nE):
-        vals = LIY_flat[k_ref, :]  # (Npix,)
-
-        good = np.isfinite(vals)
-        if not np.any(good):
-            continue
-
-        vals_good = vals[good]
-        edges = np.percentile(vals_good, edges_pct)
-
-        # We'll fill a 1D bin index array for this reference energy
-        if return_bin_maps:
-            bin_idx_1d = np.full(Npix, -1, dtype=int)
-
-        idx_good = np.where(good)[0]
-
-        for g in range(n_groups):
-            lo, hi = edges[g], edges[g + 1]
-
-            if g < n_groups - 1:
-                in_bin_good = (vals_good >= lo) & (vals_good < hi)
-            else:
-                in_bin_good = (vals_good >= lo) & (vals_good <= hi)
-
-            if not np.any(in_bin_good):
-                continue
-
-            pix_in_bin = idx_good[in_bin_good]  # indices in [0..Npix-1]
-
-            # assign bin id
-            if return_bin_maps:
-                bin_idx_1d[pix_in_bin] = g
-
-            # average full spectrum over these pixels
-            LIY_grouped[k_ref, :, g] = mean_fn(LIY_flat[:, pix_in_bin], axis=1)
-
-        if return_bin_maps:
-            bin_maps[k_ref] = bin_idx_1d.reshape(Ny, Nx)
-
-    if return_bin_maps:
-        return en_sorted, LIY_grouped, bin_maps
-    else:
-        return en_sorted, LIY_grouped
-
 def plot_LIY_groups_at_energy_with_binmap(
     en,
     LIY_grouped,
@@ -1517,8 +1433,8 @@ def plot_LIY_groups_at_energy_with_binmap(
     if k_ref < 0 or k_ref >= nE_ref:
         raise IndexError("Reference energy index out of range")
 
-    fig, (ax0, ax2, ax1) = plt.subplots(
-        1, 3, figsize=(12, 4), gridspec_kw={"width_ratios": [1, 1.0, 1.0]}
+    fig, (ax0, ax2, ax1, axL) = plt.subplots(
+        1, 4, figsize=(16, 4), gridspec_kw={"width_ratios": [1, 1.0, 1.0, 1]}
     )
 
     # --- colors for groups (same for lines and map) ---
@@ -1574,8 +1490,233 @@ def plot_LIY_groups_at_energy_with_binmap(
     cbar.set_label("Bin # (low → high percentile)")
 
     fig.tight_layout()
-    return fig, (ax0, ax2, ax1), bm_masked, specs
     
+    return fig, (ax0, ax2, ax1, axL), bm_masked, specs
+
+def group_LIY_by_intensity_at_each_energy(
+    en, LIY, LIY_original, n_groups=10, use_nanmean=True, return_bin_maps=True, return_edges=True
+):
+    """
+    Group pixels by LIY intensity at each reference energy, then average full spectra per group.
+
+    Returns:
+      en_sorted: (nE,)
+      LIY_grouped: (nE_ref, nE, n_groups)
+      bin_maps (optional): (nE_ref, Ny, Nx) with bin index per pixel, or -1 if invalid.
+      edges_all (optional): (nE_ref, n_groups+1) edges used at each reference energy (NaN if invalid)
+    """
+    en = np.asarray(en)
+    LIY = np.asarray(LIY)
+
+    if LIY.ndim != 3:
+        raise ValueError("LIY must have shape (n_energy, Ny, Nx)")
+
+    nE, Ny, Nx = LIY.shape
+    if en.shape[0] != nE:
+        raise ValueError("en length must match LIY.shape[0]")
+
+    # ---- sort energies ----
+    order = np.argsort(en)
+    en_sorted = en[order]
+    LIY_sorted = LIY[order, :, :]
+    LIY_original_sorted = LIY_original[order, :, :]
+    # ---- flatten pixels ----
+    Npix = Ny * Nx
+    LIY_flat = LIY_sorted.reshape(nE, Npix)  # (nE, Npix)
+    LIY_original_flat = LIY_original_sorted.reshape(nE, Npix)  # (nE, Npix)
+
+    mean_fn = np.nanmean if use_nanmean else np.mean
+    LIY_grouped = np.full((nE, nE, n_groups), np.nan, dtype=float)
+    LIY_original_grouped = np.full((nE, nE, n_groups), np.nan, dtype=float)
+    # bin map output
+    bin_maps = None
+    if return_bin_maps:
+        bin_maps = np.full((nE, Ny, Nx), -1, dtype=int)
+
+    # edges output
+    edges_all = None
+    if return_edges:
+        edges_all = np.full((nE, n_groups + 1), np.nan, dtype=float)
+
+    edges_pct = np.linspace(0, 100, n_groups + 1)
+
+    for k_ref in range(nE):
+        vals = LIY_flat[k_ref, :]  # (Npix,)
+
+        good = np.isfinite(vals)
+        if not np.any(good):
+            continue
+
+        vals_good = vals[good]
+        edges = np.percentile(vals_good, edges_pct)
+
+        if return_edges:
+            edges_all[k_ref] = edges
+
+        # We'll fill a 1D bin index array for this reference energy
+        if return_bin_maps:
+            bin_idx_1d = np.full(Npix, -1, dtype=int)
+
+        idx_good = np.where(good)[0]
+
+        for g in range(n_groups):
+            lo, hi = edges[g], edges[g + 1]
+
+            if g < n_groups - 1:
+                in_bin_good = (vals_good >= lo) & (vals_good < hi)
+            else:
+                in_bin_good = (vals_good >= lo) & (vals_good <= hi)
+
+            if not np.any(in_bin_good):
+                continue
+
+            pix_in_bin = idx_good[in_bin_good]  # indices in [0..Npix-1]
+
+            # assign bin id
+            if return_bin_maps:
+                bin_idx_1d[pix_in_bin] = g
+
+            # average full spectrum over these pixels
+            LIY_grouped[k_ref, :, g] = mean_fn(LIY_flat[:, pix_in_bin], axis=1)
+            LIY_original_grouped[k_ref, :, g] = mean_fn(LIY_original_flat[:, pix_in_bin], axis=1)
+
+        if return_bin_maps:
+            bin_maps[k_ref] = bin_idx_1d.reshape(Ny, Nx)
+
+    out = [en_sorted, LIY_grouped, LIY_original_grouped]
+    if return_bin_maps:
+        out.append(bin_maps)
+    if return_edges:
+        out.append(edges_all)
+
+    return tuple(out)
+
+
+def plot_LIY_groups_at_energy_with_binmap_and_LIYmap(
+    en,
+    LIY_sorted,          # <-- pass the *sorted* LIY cube (same ordering as en)
+    LIY_grouped,
+    bin_maps,
+    edges_all,           # <-- (nE_ref, n_groups+1)
+    E_ref,
+    *,
+    energy_is_index=False,
+    cmap="viridis",
+    linewidth=2.0,
+    alpha=0.9,
+):
+    """
+    Panels:
+      (1) grouped spectra at chosen reference energy
+      (2) same spectra shifted to Bin 1 baseline
+      (3) bin assignment map
+      (4) original LIY map (unbinned) colored so bin centers match bin colors
+    """
+    en = np.asarray(en)
+    LIY_sorted = np.asarray(LIY_sorted)
+    LIY_grouped = np.asarray(LIY_grouped)
+    bin_maps = np.asarray(bin_maps)
+    edges_all = np.asarray(edges_all)
+
+    nE_ref, nE, n_groups = LIY_grouped.shape
+
+    if not energy_is_index:
+        k_ref = int(np.argmin(np.abs(en - E_ref)))
+    else:
+        k_ref = int(E_ref)
+
+    if k_ref < 0 or k_ref >= nE_ref:
+        raise IndexError("Reference energy index out of range")
+
+    # --- colors for groups (same for lines and both maps) ---
+    cmap_obj = plt.get_cmap(cmap)
+    colors = cmap_obj(np.linspace(0.15, 0.95, n_groups))
+    disc_cmap = ListedColormap(colors)
+
+    fig, (ax0, ax2, ax1, axL) = plt.subplots(
+        1, 4, figsize=(18, 4), gridspec_kw={"width_ratios": [1, 1, 1, 1]}
+    )
+    
+    specs = LIY_grouped[k_ref]  # (nE, n_groups)
+    # --- spectra panel ---
+    for g in range(n_groups):
+        spec = LIY_grouped[k_ref, :, g]
+        if np.all(np.isnan(spec)):
+            continue
+        ax0.plot(en, spec, color=colors[g], lw=linewidth, alpha=alpha, label=f"Bin {g+1}")
+        ax2.plot(en, spec - LIY_grouped[k_ref, :, 0], color=colors[g], lw=linewidth, alpha=alpha)
+
+    ax0.set_xlabel("Bias (V)")
+    ax0.set_ylabel("dI/dV (a.u.)")
+    ax0.set_title(f"Reference bias = {en[k_ref]:.3g} V")
+
+    ax2.set_xlabel("Bias (V)")
+    ax2.set_ylabel("dI/dV (a.u.) - Bin 1")
+    ax2.set_title("Shifted to Bin 1 baseline")
+
+    # --- bin map panel ---
+    bm = bin_maps[k_ref]  # (Ny, Nx) with 0..n_groups-1 or -1
+    bm_masked = np.ma.masked_where(bm < 0, bm)
+    im_bm = ax1.imshow(
+        bm_masked,
+        cmap=disc_cmap,
+        interpolation="none",
+        vmin=0,
+        vmax=n_groups - 1,
+        origin="lower",
+    )
+    ax1.set_title("Bin map (percentile groups)")
+    ax1.set_xticks([])
+    ax1.set_yticks([])
+
+    cbar_bm = fig.colorbar(im_bm, ax=ax1, fraction=0.046, pad=0.04)
+    cbar_bm.set_ticks(np.arange(n_groups))
+    cbar_bm.set_ticklabels([str(i + 1) for i in range(n_groups)])
+    cbar_bm.set_label("Bin # (low → high)")
+
+    from matplotlib.colors import LinearSegmentedColormap, Normalize
+
+    # --- original LIY map panel, continuous colormap pinned at bin centers ---
+    LIY_map = LIY_sorted[k_ref, :, :]
+    LIY_map_masked = np.ma.masked_invalid(LIY_map)
+
+    edges = edges_all[k_ref]                 # (n_groups+1,)
+    centers = 0.5 * (edges[:-1] + edges[1:]) # (n_groups,)
+
+    vmin, vmax = edges[0], edges[-1]
+    norm = Normalize(vmin=vmin, vmax=vmax)
+
+    # same group colors you already use for lines/binmap:
+    # colors shape (n_groups, 4)
+
+    # Build anchor points in [0,1] with exact colors at bin centers
+    anchors = [(norm(vmin), colors[0])]
+    anchors += [(norm(c), colors[g]) for g, c in enumerate(centers)]
+    anchors += [(norm(vmax), colors[-1])]
+
+    cont_cmap = LinearSegmentedColormap.from_list("LIY_pinned", anchors, N=256)
+
+    im_L = axL.imshow(
+        LIY_map_masked,
+        cmap=cont_cmap,
+        norm=norm,
+        interpolation="none",
+        origin="lower",
+    )
+
+    axL.set_title("Original LIY map (continuous, pinned at bin centers)")
+    axL.set_xticks([])
+    axL.set_yticks([])
+
+    cbar_L = fig.colorbar(im_L, ax=axL, fraction=0.046, pad=0.04)
+    cbar_L.set_ticks(centers)  # optional: label the bin centers
+    cbar_L.set_ticklabels([f"{c:.2g}" for c in centers])
+    cbar_L.set_label("LIY (bin centers pinned to bin colors)")
+
+    fig.tight_layout()
+    return fig, (ax0, ax2, ax1, axL), bm_masked, specs
+
+
 def plot_LIY_groups_at_energy(
     en,
     LIY_grouped,
