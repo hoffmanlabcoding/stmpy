@@ -35,7 +35,10 @@ def plot_FFT_data(data,
                   ax=None,
                   add_colorbar=False,
                   make_circle=None,
-                  savename=None):
+                  savename=None,
+                  scalebar=None,
+                  
+                  ):
     
     arr = np.asarray(data)
     if arr.ndim != 2:
@@ -90,6 +93,8 @@ def plot_FFT_data(data,
     ax.imshow(arr, origin='lower', cmap=cmap, clim=clim, interpolation='none')
     if add_colorbar:
         stmpy.image.add_colorbar(ax=ax, loc=0, label='FFT Amplitude', fs=8)
+    if scalebar is not None:
+        stmpy.image.add_scale_bar(scalebar[0], scalebar[1], scalebar[2], ax=ax, unit='Å^{-1}', color='black', barheight=1e-3)
     # ax.set_axis_off()
     ax.set_xticks([])
     ax.set_yticks([])
@@ -99,6 +104,8 @@ def plot_FFT_data(data,
         print(cx, cy, make_circle)
         circ = patches.Circle((cx, cy), make_circle, fill=False, edgecolor='cyan', lw=1.5)
         ax.add_patch(circ)
+    
+        
     if savename is not None:
         fig.savefig(savename)
     return fig, ax
@@ -1684,6 +1691,7 @@ def plot_LIY_groups_at_energy_with_binmap_and_LIYmap(
     centers = 0.5 * (edges[:-1] + edges[1:]) # (n_groups,)
 
     vmin, vmax = edges[0], edges[-1]
+    print(vmin, vmax)
     norm = Normalize(vmin=vmin, vmax=vmax)
 
     # same group colors you already use for lines/binmap:
@@ -1704,7 +1712,7 @@ def plot_LIY_groups_at_energy_with_binmap_and_LIYmap(
         origin="lower",
     )
 
-    axL.set_title("Original LIY map (continuous, pinned at bin centers)")
+    axL.set_title(f"Original LIY map (continuous, pinned at bin centers) [{vmin*1e11:0.3g}, {vmax*1e11:0.3g}] 10^-11")
     axL.set_xticks([])
     axL.set_yticks([])
 
@@ -2061,7 +2069,9 @@ def model_0center_plus_one_pair(x,
     return y + offset
 
 # --- Fit function with optional plotting ---
-def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_peaks=False, maxfev=20000, ax=None, yscale_log=False, mask_values=None):
+def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_peaks=False, maxfev=20000, ax=None, yscale_log=False, 
+                            mask_values=None,
+                            return_lines=False):
     """
     Fit central Lorentzian + one symmetric Lorentzian pair + constant offset.
 
@@ -2123,4 +2133,6 @@ def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_p
         ax.set_xlim(mask_values[0], mask_values[1])
         if yscale_log:
             ax.set_yscale('log')
+        if return_lines:
+            return popt, pcov, param_names, model_center_plus_one_pair, xplot, y, xplots, y_fit, y_center, y_pair, ax
     return popt, pcov, param_names, model_center_plus_one_pair, ax
