@@ -178,6 +178,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                              idx= None, 
                              add_colorbar=False, 
                              colorbar_range=None,
+                             colorbar_range_FFT=None,
                              colorbar_range_ps=None,
                              add_label=True,
                              sym=None,
@@ -251,13 +252,13 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                         if add_label:
                             stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i,j], fs=8)
             print(k_crop_n)
-            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[0,5], add_colorbar=add_colorbar)
-            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[0,6], add_colorbar=add_colorbar)
-            plot_FFT_data(data.FZ_BWD_ls, k_crop_n=k_crop_n, ax=ax_topo[1,5], add_colorbar=add_colorbar)
-            plot_FFT_data(data.FZ_BWD_ls, k_crop_n=0, ax=ax_topo[1,6], add_colorbar=add_colorbar)
+            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[0,5], add_colorbar=add_colorbar, clim=colorbar_range_FFT)
+            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[0,6], add_colorbar=add_colorbar, clim=colorbar_range_FFT)
+            plot_FFT_data(data.FZ_BWD_ls, k_crop_n=k_crop_n, ax=ax_topo[1,5], add_colorbar=add_colorbar, clim=colorbar_range_FFT)
+            plot_FFT_data(data.FZ_BWD_ls, k_crop_n=0, ax=ax_topo[1,6], add_colorbar=add_colorbar, clim=colorbar_range_FFT)
             if sym is not None:
-                plot_FFT_data(data.FZ_ls_s, k_crop_n=k_crop_n, ax=ax_topo[0,7], add_colorbar=add_colorbar)
-                plot_FFT_data(data.FZ_BWD_ls_s, k_crop_n=k_crop_n, ax=ax_topo[1,7], add_colorbar=add_colorbar)
+                plot_FFT_data(data.FZ_ls_s, k_crop_n=k_crop_n, ax=ax_topo[0,7], add_colorbar=add_colorbar, clim=colorbar_range_FFT)
+                plot_FFT_data(data.FZ_BWD_ls_s, k_crop_n=k_crop_n, ax=ax_topo[1,7], add_colorbar=add_colorbar, clim=colorbar_range_FFT)
             
     else:
         if make_plots:
@@ -279,8 +280,8 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                     if add_label:
                             stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i], fs=8)
 
-            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[5])
-            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[6])
+            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[5], clim=colorbar_range_FFT)
+            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[6], clim=colorbar_range_FFT)
 
     if make_plots:
         # fig_topo.tight_layout()
@@ -1611,6 +1612,7 @@ def plot_LIY_groups_at_energy_with_binmap_and_LIYmap(
     cmap="viridis",
     linewidth=2.0,
     alpha=0.9,
+    v_offset=0,
 ):
     """
     Panels:
@@ -1650,7 +1652,7 @@ def plot_LIY_groups_at_energy_with_binmap_and_LIYmap(
         spec = LIY_grouped[k_ref, :, g]
         if np.all(np.isnan(spec)):
             continue
-        ax0.plot(en, spec, color=colors[g], lw=linewidth, alpha=alpha, label=f"Bin {g+1}")
+        ax0.plot(en, spec+v_offset, color=colors[g], lw=linewidth, alpha=alpha, label=f"Bin {g+1}")
         ax2.plot(en, spec - LIY_grouped[k_ref, :, 0], color=colors[g], lw=linewidth, alpha=alpha)
 
     ax0.set_xlabel("Bias (V)")
@@ -1907,8 +1909,10 @@ def fit_center_and_two_pairs(
         x0, A0, g0, A1, d1, g1, A2, d2, g2, off = popt
         xs = np.linspace(x.min(), x.max(), 1000)
         y_fits = model_center_plus_two_pairs(xs, *popt)
+        
 
         y_centers = lorentz(xs, A0, x0, g0) + off
+        y_center = lorentz(x, A0, x0, g0) + off
         y_pair1s = (
             lorentz(xs, A1, x0 + d1, g1)
             + lorentz(xs, A1, x0 - d1, g1)
@@ -1917,7 +1921,13 @@ def fit_center_and_two_pairs(
             lorentz(xs, A2, x0 + d2, g2)
             + lorentz(xs, A2, x0 - d2, g2)
         )
-
+        y_BPonly = y - lorentz(x, A0, x0, g0) - off - (
+            lorentz(x, A1, x0 + d1, g1)
+            + lorentz(x, A1, x0 - d1, g1)
+        ) - (
+            lorentz(x, A2, x0 + d2, g2)
+            + lorentz(x, A2, x0 - d2, g2)
+        )
         plt.figure(figsize=(6, 6))
         plt.plot(x, y, "k.", ms=2, label="data")
         plt.plot(xs, y_fits, "r-", lw=1, label="total fit")
@@ -1950,7 +1960,7 @@ def fit_center_and_two_pairs(
         plt.show()
         # Fitted lines
         if return_lines:
-            return popt, pcov, param_names, x, xs, y_fits, y_centers, y_pair1s, y_pair2s
+            return popt, pcov, param_names, x, y_BPonly, xs, y_fits, y_centers, y_pair1s, y_pair2s
     return popt, pcov, param_names, 
 
 def fit_0center_and_two_pairs(
@@ -2104,7 +2114,10 @@ def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_p
         y_fit = model_center_plus_one_pair(xs, *popt)
         y_center = lorentz(xs, A0, x0, g0) + off
         y_pair = lorentz(xs, A1, x0 + d1, g1) + lorentz(xs, A1, x0 - d1, g1)
-
+        y_BPonly = y - lorentz(x, A0, x0, g0) - off - (
+            lorentz(x, A1, x0 + d1, g1)
+            + lorentz(x, A1, x0 - d1, g1)
+        )
         xplots = (xs-x0) / d1
         xplot = (x-x0) / d1
         if mask_values is None:
@@ -2134,5 +2147,101 @@ def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_p
         if yscale_log:
             ax.set_yscale('log')
         if return_lines:
-            return popt, pcov, param_names, model_center_plus_one_pair, xplot, y, xplots, y_fit, y_center, y_pair, ax
+            return popt, pcov, param_names, model_center_plus_one_pair, xplot, y_BPonly, y, xplots, y_fit, y_center, y_pair, ax
     return popt, pcov, param_names, model_center_plus_one_pair, ax
+
+import numpy as np
+
+def crop_square_center_max(C, center_on="max", prefer_odd=True, return_slices=False):
+    """
+    Crop a square subarray from 2D array C so that the chosen target point
+    (by default the global maximum) is centered as well as possible.
+
+    Parameters
+    ----------
+    C : (H, W) array_like
+        Input 2D data.
+    center_on : {"max"} or (row, col)
+        - "max": center on global maximum (argmax)
+        - (r, c): explicitly center on this index
+    prefer_odd : bool
+        If True, make the cropped square size odd so the center is a single pixel.
+    return_slices : bool
+        If True, also return (row_slice, col_slice)
+
+    Returns
+    -------
+    Cc : (L, L) ndarray
+        Cropped square.
+    (optional) row_slice, col_slice : slice
+        The slices applied to the original array.
+    """
+    C = np.asarray(C)
+    if C.ndim != 2:
+        raise ValueError("C must be a 2D array")
+
+    H, W = C.shape
+
+    if center_on == "max":
+        r0, c0 = np.unravel_index(np.nanargmax(np.abs(C)), C.shape)
+    else:
+        r0, c0 = center_on
+        if not (0 <= r0 < H and 0 <= c0 < W):
+            raise ValueError("center_on index out of bounds")
+
+    # Max half-size allowed while keeping (r0,c0) inside the crop
+    top = r0
+    bottom = H - 1 - r0
+    left = c0
+    right = W - 1 - c0
+    half = min(top, bottom, left, right)  # symmetric half-span
+
+    # Choose square side length
+    L = 2 * half + 1
+    if not prefer_odd:
+        # allow even length by trimming 1 if needed
+        pass
+
+    # If we want odd and L is odd already; good.
+    # If prefer_odd=False, you could also choose L=2*half or 2*half+1; we keep odd by default.
+
+    r_start = r0 - half
+    r_end = r0 + half + 1
+    c_start = c0 - half
+    c_end = c0 + half + 1
+
+    rs = slice(r_start, r_end)
+    cs = slice(c_start, c_end)
+    Cc = C[rs, cs]
+
+    if return_slices:
+        return Cc, rs, cs
+    return Cc
+
+import numpy as np
+
+def crop_center(arr, frac=0.75):
+    """
+    Crop the central `frac` of an array in the last two dimensions.
+    Works for (Ny, Nx) or (..., Ny, Nx).
+    """
+    if not (0 < frac <= 1):
+        raise ValueError("frac must be in (0, 1].")
+
+    Ny, Nx = arr.shape[-2], arr.shape[-1]
+    cy, cx = Ny // 2, Nx // 2
+
+    hy = int(round((frac * Ny) / 2))
+    hx = int(round((frac * Nx) / 2))
+
+    y0, y1 = cy - hy, cy + hy
+    x0, x1 = cx - hx, cx + hx
+
+    # clamp just in case rounding hits edges
+    y0, y1 = max(0, y0), min(Ny, y1)
+    x0, x1 = max(0, x0), min(Nx, x1)
+
+    if arr.ndim == 2:
+        return arr[y0:y1, x0:x1]
+    else:
+        return arr[..., y0:y1, x0:x1]
