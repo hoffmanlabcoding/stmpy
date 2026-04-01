@@ -985,8 +985,8 @@ def load_sm4(filePath, single_point_spectra=False):
         if arr.ndim == 2:
             n_pixels_flat, depth = arr.shape
             s = int(np.sqrt(n_pixels_flat))
-            print(s)
-            print(n_pixels_flat)
+            # print(s)
+            # print(n_pixels_flat)
             if not single_point_spectra:
                 if s * s != n_pixels_flat:
                     raise ValueError(f"First dim {n_pixels_flat} is not a perfect square")
@@ -1006,7 +1006,7 @@ def load_sm4(filePath, single_point_spectra=False):
     i = getf('LINECurrent')
     z = getf('IMAGETopography')
 
-    print(liy, i, z)
+    # print(liy, i, z)
 
     self.en = {}
     if liy < 100:
@@ -1025,7 +1025,7 @@ def load_sm4(filePath, single_point_spectra=False):
         if single_point_spectra:
             self.LIY = self.LIY
         else:
-            print(self.LIY.shape)
+            # print(self.LIY.shape)
             self.LIY = ensure_square(self.LIY)[:, ::-1, ::-1][self.order]
             self.didvStd = np.std(self.LIY, axis=0)
             self.didv = np.mean(self.LIY, axis=0)
@@ -1039,7 +1039,7 @@ def load_sm4(filePath, single_point_spectra=False):
             else:
                     print('LIY only FWD found')
     else:
-        print('ERR: LIY channel not found')
+        print('WARN: LIY channel not found')
     
     if _make_attr(self, 'Z', [z], 'data'):
         self.Z = self.Z[::-1, ::-1]
@@ -1051,7 +1051,7 @@ def load_sm4(filePath, single_point_spectra=False):
         else:
             print('Z only FWD found')
     else:
-        print('ERR: Z channel not found')
+        print('WARN: Z channel not found')
 
 
     if _make_attr(self, 'I', [i], 'data'):
@@ -1069,7 +1069,7 @@ def load_sm4(filePath, single_point_spectra=False):
             else:
                     print('I only FWD found')
     else:
-        print('ERR: Current not found')
+        print('WARN: Current not found')
     
 
     

@@ -119,7 +119,7 @@ def check_bp(A, bp, obj=None):
     History:
         05-25-2020      RL : Initial commit.
     '''
-    center = (np.array(np.shape(A)[::-1])-1) // 2
+    center = np.array(np.shape(A)[::-1])//2
     Q = bp-center
     angles = np.degrees(np.arctan2(Q[:, 1], Q[:, 0]))
     angles_diff = angles - angles[0]
@@ -137,7 +137,7 @@ def __even_bp(bp, s):
     This internal function rounds the Bragg peaks to their nearest even number of Q vectors.
     '''
     *_, s2, s1 = s
-    center = (np.array([s1, s2])-1) // 2
+    center = np.array([s1, s2]) // 2
     bp_temp = bp - center
     for i, ix in enumerate(bp_temp):
         for j, num in enumerate(ix):
@@ -485,7 +485,7 @@ def gshearcorr(A, bp=None, rspace=True, pts1=None, pts2=None, angle=np.pi/4, ori
         if pts1 is None:
             if s1 == s2:
                 bp = sortBraggs(bp, s=np.shape(A))
-                center = (np.array([s1, s2])-1) // 2
+                center = np.array([s1, s2]) // 2
                 Q1, Q2, Q3, Q4, *_ = bp
                 Qx_mag = compute_dist(Q1, center)
                 Qy_mag = compute_dist(Q2, center)
@@ -498,7 +498,7 @@ def gshearcorr(A, bp=None, rspace=True, pts1=None, pts2=None, angle=np.pi/4, ori
                 s = np.array(np.shape(A))
                 bp_temp = bp * s
                 # center = [int(s[0]*s[1]/2), int(s[0]*s[1]/2)]
-                center = (np.array([s[0]*s[1], s[0]*s[1]])-1) // 2
+                center = np.array([s[0]*s[1], s[0]*s[1]]) // 2
                 Q1, Q2, Q3, Q4, *_ = bp_temp
                 Qx_mag = compute_dist(Q1, center)
                 Qy_mag = compute_dist(Q2, center)
@@ -508,7 +508,7 @@ def gshearcorr(A, bp=None, rspace=True, pts1=None, pts2=None, angle=np.pi/4, ori
                 Q1, Q2, Q3, Q4, *_ = bp
                 Qc2 = np.array([int(k) for k in Qc2 / s])
                 Qc1 = np.array([int(k) for k in Qc1 / s])
-                center = (np.array([s1, s2])-1) // 2
+                center = np.array([s1, s2]) // 2
                 pts1 = np.float32([center, Q1, Q2])
         else:
             pts1 = pts1.astype(np.float32)
@@ -681,10 +681,10 @@ def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp
         stmpy.image.add_colorbar(ax=ax[0,0], loc=0, label=A_unit, fs=8)
         stmpy.image.add_colorbar(ax=ax[1,0], loc=0, label=A_unit, fs=8)
 
-        ax[0,1].imshow(theta1, origin='lower', clim=[-np.pi, np.pi])
+        ax[0,1].imshow(theta1, origin='lower', clim=[-np.pi, np.pi], cmap='RdBu')
         # latex style for theta
         ax[0,1].set_title(r'Phase $\theta_{1}$', fontsize=10)
-        ax[1,1].imshow(theta2, origin='lower', clim=[-np.pi, np.pi])
+        ax[1,1].imshow(theta2, origin='lower', clim=[-np.pi, np.pi], cmap='RdBu')
         ax[1,1].set_title(r'Phase $\theta_{2}$', fontsize=10)
         stmpy.image.add_colorbar(ax=ax[0,1], loc=0, label='rad', fs=8)
         stmpy.image.add_colorbar(ax=ax[1,1], loc=0, label='rad', fs=8)
@@ -1045,7 +1045,7 @@ def correct(self, use):
 def __update_parameters(obj, a0=None, bp=None, pixels=None, size=None, use_a0=True):
 
     if use_a0 is True:
-        center = (np.array(pixels)-1) // 2
+        center = np.array(pixels) // 2
         Q = bp - center
         q1, q2, q3, q4, *_ = Q
         delta_qx = (np.absolute(q1[0]-q3[0])+np.absolute(q2[0]-q4[0])) / 2
@@ -1068,7 +1068,7 @@ def __update_parameters(obj, a0=None, bp=None, pixels=None, size=None, use_a0=Tr
         obj.qy = bp[1] - center
 
     else:
-        center = (np.array(pixels)-1) // 2
+        center = np.array(pixels) // 2
         bp_x = np.min(bp[:, 0])
         ext_x = pixels[0] / (pixels[0] - 2*bp_x)
         bp_y = np.min(bp[:, 1])
@@ -1199,7 +1199,7 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=0, r=None,
             plt.xlim(crop_n, width - crop_n)
             plt.ylim(crop_n, height - crop_n)  
             
-        center = (np.array(np.shape(A)[::-1])-1) // 2
+        center = np.array(np.shape(A)[::-1]) // 2
         print('The coordinates of the Bragg peaks are:')
         pprint(coords)
         print()
@@ -1234,7 +1234,7 @@ def mask_bp(A, p):
     t1 = np.arange(s1)
     t2 = np.arange(s2)
     x, y = np.meshgrid(t1, t2)
-    center = (np.array([s1, s2])-1) // 2
+    center = np.array([s1, s2]) // 2
     mask = np.ones_like(x)
     theta = 2 * np.pi / n
     for i in range(n):
@@ -1250,7 +1250,7 @@ def __even_bp(bp, s):
     This internal function rounds the Bragg peaks to their nearest even number of Q vectors.
     '''
     *_, s2, s1 = s
-    center = (np.array([s1, s2])-1) // 2
+    center = np.array([s1, s2]) // 2
     bp_temp = bp - center
     for i, ix in enumerate(bp_temp):
         for j, num in enumerate(ix):
@@ -1963,7 +1963,7 @@ def generate_bp(A, bp, angle=np.pi/2, bp_pick=(0,1), orient=None, even_out=False
     '''
     *_, s2, s1 = np.shape(A)
     bp_sorted = sortBraggs(bp, s=np.shape(A))
-    center = (np.array([s1, s2]) - 1) // 2
+    center = np.array([s1, s2]) // 2
 
     # robust radius from all peaks
     v_all = bp_sorted - center
@@ -2003,7 +2003,7 @@ def generate_bp(A, bp, angle=np.pi/2, bp_pick=(0,1), orient=None, even_out=False
 def sortBraggs(bp, s):
     ''' Sort the Bragg peaks in the order of "lower left, lower right, upper right, and upper left" '''
     *_, s2, s1 = s
-    center = np.array([(s1 - 1) // 2, (s2 - 1) // 2])
+    center = np.array([s1, s2])// 2
     out = np.array(sorted(bp-center, key=lambda x: np.arctan2(*x))) + center
     return out
 
@@ -2059,7 +2059,7 @@ def bp_to_q(bp, A):
     bp      - Required : Array of Bragg peaks
     A       - Required : 
     '''
-    center = (np.array(np.shape(A)[::-1])-1) // 2
+    center = np.array(np.shape(A)[::-1]) // 2
     return bp - center
 
 def __even_bp(bp, s):
@@ -2067,7 +2067,7 @@ def __even_bp(bp, s):
     This internal function rounds the Bragg peaks to their nearest even number of Q vectors.
     '''
     *_, s2, s1 = s
-    center = (np.array([s2, s1])-1) // 2
+    center = np.array([s2, s1]) // 2
     bp_temp = bp - center
     for i, ix in enumerate(bp_temp):
         for j, num in enumerate(ix):

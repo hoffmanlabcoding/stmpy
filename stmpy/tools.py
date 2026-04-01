@@ -3050,6 +3050,7 @@ def cdw_intensity_map(data, Q, radius,
                       colorbar_range_fft=None,
                       colorbar_fft_log_scale=False,      
                       return_complement=False,
+                      scalebar_FFT=None,
                       savename=None,
                       scalebar=None):
     img = np.asarray(data)
@@ -3156,6 +3157,7 @@ def cdw_intensity_map(data, Q, radius,
         # Logscale option for FFT colorbar
     
         if crop_n > 0:
+            print(cx - crop_n, cx + crop_n)
             ax_FFT_original.set_xlim(cx - crop_n, cx + crop_n)
             ax_FFT_original.set_ylim(cy - crop_n, cy + crop_n)
 
@@ -3202,7 +3204,9 @@ def cdw_intensity_map(data, Q, radius,
         if scalebar is not None:
             for ax_ in [ax_original, ax_low, ax_high]:
                 stmpy.image.add_scale_bar(scalebar[0], scalebar[1], scalebar[2], ax = ax_, fs=10)
-
+        if scalebar_FFT is not None:
+            for ax_ in [ax_FFT_original, ax_FFT_low, ax_FFT_high]:
+                stmpy.image.add_scale_bar(scalebar_FFT[0], scalebar_FFT[1], scalebar_FFT[2], ax = ax_, fs=10, color='k', unit='Å^{-1}')
         plt.tight_layout()
         plt.show()
         if savename is not None:

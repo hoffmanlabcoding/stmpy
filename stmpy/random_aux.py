@@ -192,6 +192,9 @@ def add_corrections_and_plot(data, dos_map: bool = False,
     set_current = data.scan_info['set_current']  # in pA
     set_voltage = data.scan_info['set_voltage']  # in V
 
+    delta_q = 2 * np.pi / scan_size * 0.1 # in armstrong^-1
+    FFT_scan_size = delta_q * n_pixels # in armstrong^-1
+
     figs = {}
 
     # --- Topography corrections ---
@@ -252,13 +255,19 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                         if add_label:
                             stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i,j], fs=8)
             print(k_crop_n)
-            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[0,5], add_colorbar=add_colorbar, clim=colorbar_range_FFT)
-            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[0,6], add_colorbar=add_colorbar, clim=colorbar_range_FFT)
-            plot_FFT_data(data.FZ_BWD_ls, k_crop_n=k_crop_n, ax=ax_topo[1,5], add_colorbar=add_colorbar, clim=colorbar_range_FFT)
-            plot_FFT_data(data.FZ_BWD_ls, k_crop_n=0, ax=ax_topo[1,6], add_colorbar=add_colorbar, clim=colorbar_range_FFT)
+            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[0,5], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
+                          scalebar = [1, FFT_scan_size, n_pixels])
+            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[0,6], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
+                          scalebar = [1, FFT_scan_size, n_pixels])
+            plot_FFT_data(data.FZ_BWD_ls, k_crop_n=k_crop_n, ax=ax_topo[1,5], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
+                          scalebar = [1, FFT_scan_size, n_pixels])
+            plot_FFT_data(data.FZ_BWD_ls, k_crop_n=0, ax=ax_topo[1,6], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
+                          scalebar = [1, FFT_scan_size, n_pixels])
             if sym is not None:
-                plot_FFT_data(data.FZ_ls_s, k_crop_n=k_crop_n, ax=ax_topo[0,7], add_colorbar=add_colorbar, clim=colorbar_range_FFT)
-                plot_FFT_data(data.FZ_BWD_ls_s, k_crop_n=k_crop_n, ax=ax_topo[1,7], add_colorbar=add_colorbar, clim=colorbar_range_FFT)
+                plot_FFT_data(data.FZ_ls_s, k_crop_n=k_crop_n, ax=ax_topo[0,7], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
+                              scalebar = [1, FFT_scan_size, n_pixels])
+                plot_FFT_data(data.FZ_BWD_ls_s, k_crop_n=k_crop_n, ax=ax_topo[1,7], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
+                              scalebar = [1, FFT_scan_size, n_pixels])
             
     else:
         if make_plots:
@@ -280,8 +289,10 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                     if add_label:
                             stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i], fs=8)
 
-            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[5], clim=colorbar_range_FFT)
-            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[6], clim=colorbar_range_FFT)
+            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[5], clim=colorbar_range_FFT,
+                          scalebar = [1, FFT_scan_size, n_pixels])
+            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[6], clim=colorbar_range_FFT,
+                          scalebar = [1, FFT_scan_size, n_pixels])
 
     if make_plots:
         # fig_topo.tight_layout()
@@ -1806,16 +1817,17 @@ def plot_LIY_groups_at_energy(
     return ax
 
 
-import numpy as np
-from scipy.optimize import curve_fit
-import matplotlib.pyplot as plt
-
 # ------------------------
 # basic lorentzian
 # ------------------------
 def lorentz(x, A, x0, gamma):
     return A * (gamma**2) / ((x - x0)**2 + gamma**2)
 
+def lorentz_0(x, A, gamma):
+    return A * (gamma**2) / (x**2 + gamma**2)
+
+def lorentz_plus_linear_bg(x, A, x0, gamma, m, b):
+    return lorentz(x, A, x0, gamma) + m * x + b
 
 # ------------------------
 # model
@@ -1963,6 +1975,7 @@ def fit_center_and_two_pairs(
             return popt, pcov, param_names, x, y_BPonly, xs, y_fits, y_centers, y_pair1s, y_pair2s
     return popt, pcov, param_names, 
 
+
 def fit_0center_and_two_pairs(
     x,
     y,
@@ -1973,18 +1986,8 @@ def fit_0center_and_two_pairs(
     yscale_log=False,
     return_lines=False,
 ):
-    """
-    Fit a central Lorentzian + two symmetric Lorentzian pairs.
-
-    Parameter order:
-      [ 
-        A0, gamma0,
-        A1, delta1, gamma1,
-        A2, delta2, gamma2,
-        offset ]
-    """
-
     param_names = [
+        "x0",
         "A0", "gamma0",
         "A1", "delta1", "gamma1",
         "A2", "delta2", "gamma2",
@@ -2008,8 +2011,10 @@ def fit_0center_and_two_pairs(
         A0, g0, A1, d1, g1, A2, d2, g2, off = popt
         xs = np.linspace(x.min(), x.max(), 1000)
         y_fits = model_0center_plus_two_pairs(xs, *popt)
+        
 
         y_centers = lorentz(xs, A0, 0, g0) + off
+        y_center = lorentz(x, A0, 0, g0) + off
         y_pair1s = (
             lorentz(xs, A1, 0 + d1, g1)
             + lorentz(xs, A1, 0 - d1, g1)
@@ -2018,7 +2023,13 @@ def fit_0center_and_two_pairs(
             lorentz(xs, A2, 0 + d2, g2)
             + lorentz(xs, A2, 0 - d2, g2)
         )
-
+        y_BPonly = y - lorentz(x, A0, 0, g0) - off - (
+            lorentz(x, A1, 0 + d1, g1)
+            + lorentz(x, A1, 0 - d1, g1)
+        ) - (
+            lorentz(x, A2, 0 + d2, g2)
+            + lorentz(x, A2, 0 - d2, g2)
+        )
         plt.figure(figsize=(6, 6))
         plt.plot(x, y, "k.", ms=2, label="data")
         plt.plot(xs, y_fits, "r-", lw=1, label="total fit")
@@ -2040,8 +2051,8 @@ def fit_0center_and_two_pairs(
         plt.axvline(-delta1, ls="--", color="blue")
         plt.axvline(delta2, ls="--", color="orange", label="delta2")
         plt.axvline(-delta2, ls="--", color="orange")
-        delta1_err = np.sqrt(pcov[4, 4])
-        delta2_err = np.sqrt(pcov[7, 7])
+        delta1_err = np.sqrt(pcov[3, 3])
+        delta2_err = np.sqrt(pcov[6, 6])
         # ratio
         ratio = delta2/delta1
         ratio_err = ratio * np.sqrt(
@@ -2051,12 +2062,9 @@ def fit_0center_and_two_pairs(
         plt.show()
         # Fitted lines
         if return_lines:
-            return popt, pcov, param_names, x, xs, y_fits, y_centers, y_pair1s, y_pair2s
+            return popt, pcov, param_names, x, y_BPonly, xs, y_fits, y_centers, y_pair1s, y_pair2s
     return popt, pcov, param_names, 
 
-
-
-# --- Model: central + one symmetric pair + offset ---
 def model_center_plus_one_pair(x,
                               x0,            # center position
                               A0, gamma0,    # central Lorentzian
@@ -2150,7 +2158,65 @@ def fit_center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_p
             return popt, pcov, param_names, model_center_plus_one_pair, xplot, y_BPonly, y, xplots, y_fit, y_center, y_pair, ax
     return popt, pcov, param_names, model_center_plus_one_pair, ax
 
-import numpy as np
+
+def fit_0center_and_one_pair(x, y, p0, bounds=None, plot=False, show_individual_peaks=False, maxfev=20000, ax=None, yscale_log=False, 
+                            mask_values=None,
+                            return_lines=False):
+
+    param_names = [
+        "A0", "gamma0",
+        "A1", "delta1", "gamma1",
+        "offset"
+    ]
+
+    # perform fit
+    if bounds is None:
+        popt, pcov = curve_fit(model_0center_plus_one_pair, x, y, p0=p0, maxfev=maxfev)
+    else:
+        popt, pcov = curve_fit(model_0center_plus_one_pair, x, y, p0=p0, bounds=bounds, maxfev=maxfev)
+
+    # plotting
+    if plot:
+        A0, g0, A1, d1, g1, off = popt
+        xs = np.linspace(x.min(), x.max(), 1000)
+        y_fit = model_0center_plus_one_pair(xs, *popt)
+        y_center = lorentz(xs, A0, 0, g0) + off
+        y_pair = lorentz(xs, A1, 0 + d1, g1) + lorentz(xs, A1, 0 - d1, g1)
+        y_BPonly = y - lorentz(x, A0, 0, g0) - off - (
+            lorentz(x, A1, 0 + d1, g1)
+            + lorentz(x, A1, 0 - d1, g1)
+        )
+        xplots = xs
+        xplot = x
+        if mask_values is None:
+            mask_values = (x.min(), x.max())
+        mask = (xplot >= mask_values[0]) & (xplot <= mask_values[1])
+        masks = (xplots >= mask_values[0]) & (xplots <= mask_values[1])
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(8,5))
+        ax.scatter(
+            xplot[mask], y[mask],
+            s=4,              # size (roughly similar to ms=4)
+            marker='o',
+            facecolors='none', # hollow
+            edgecolors='k',    # black outline
+            linewidths=0.8,
+            label='data'
+        )
+        ax.plot(xplots[masks], y_fit[masks], 'r-', lw=0.5, label='total fit')
+        ax.fill_between(xplots[masks], 0, y_center[masks],  color='gray', alpha=0.25, label='central Lorentzian')
+        ax.fill_between(xplots[masks], 0, y_pair[masks],  color='green', alpha=0.25, label='pair: +peak')
+
+        ax.set_xlabel('x')
+        ax.set_ylabel('intensity')
+        # ax.legend()
+        ax.set_xlim(mask_values[0], mask_values[1])
+        if yscale_log:
+            ax.set_yscale('log')
+        if return_lines:
+            return popt, pcov, param_names, model_0center_plus_one_pair, xplot, y_BPonly, y, xplots, y_fit, y_center, y_pair, ax
+    return popt, pcov, param_names, model_0center_plus_one_pair, ax
 
 def crop_square_center_max(C, center_on="max", prefer_odd=True, return_slices=False):
     """
