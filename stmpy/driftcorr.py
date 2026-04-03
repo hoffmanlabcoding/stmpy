@@ -607,7 +607,7 @@ def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp
         print(bp_c)
 
         fig, ax = plt.subplots(1, 2, figsize=[8, 4])
-        ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower')
+        ax[0].imshow(A, cmap=stmpy.cm.Blues_r, origin='lower')
         A_fft = stmpy.tools.fft(A, zeroDC=True)
         clim = [0, np.mean(A_fft)+3*np.std(A_fft)]
         ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=clim)
@@ -745,9 +745,9 @@ def find_drift_parameter(A, r=None, w=None, mask3=None, cut1=None, cut2=None, bp
 
         fig, ax = plt.subplots(1, 4, figsize=[12, 3])
         fig.suptitle('Maps before and after drift correction:')
-        ax[0].imshow(A, cmap=stmpy.cm.blue2, origin='lower', clim=[c2-5*s2, c2+5*s2])
+        ax[0].imshow(A, cmap=stmpy.cm.Blues_r, origin='lower', clim=[c2-5*s2, c2+5*s2])
         ax[1].imshow(A_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c1+5*s1])
-        ax[2].imshow(z_c, cmap=stmpy.cm.blue2, origin='lower', clim=[c2-5*s2, c2+5*s2])
+        ax[2].imshow(z_c, cmap=stmpy.cm.Blues_r, origin='lower', clim=[c2-5*s2, c2+5*s2])
         ax[3].imshow(B_fft, cmap=stmpy.cm.gray_r, origin='lower', clim=[0, c1+5*s1])
         for ax in ax.flatten():
             ax.axis('off')
@@ -1791,8 +1791,6 @@ def gpa_strain_from_carriers(Q1, Q2, psi1, psi2,
         extras = dict(mask=mask, A1=A1, A2=A2, du_dx=du_dx, dv_dx=dv_dx, du_dy=du_dy, dv_dy=dv_dy)
         return exx, eyy, exy, rot, eps_h, eps_s, extras
     return exx, eyy, exy, rot, eps_h, eps_s
-
-import numpy as np
 
 def strain_along_lattice(exx, eyy, exy, Q1, Q2):
     """
