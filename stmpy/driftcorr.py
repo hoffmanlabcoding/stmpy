@@ -1539,7 +1539,7 @@ def driftcorr(A, ux=None, uy=None, method="lockin", interpolation='cubic'):
         xnew = (x - ux).ravel()
         ynew = (y - uy).ravel()
         tmp = np.zeros(s1*s2)
-        if len(A.shape) is 2:
+        if len(A.shape) == 2:
             if(interpolation == 'cubic'):
                 tmp_f = RectBivariateSpline(t1, t2, A.T, kx=3, ky=3) # cubic kx=ky=3
             elif(interpolation == 'linear'):
@@ -1547,11 +1547,12 @@ def driftcorr(A, ux=None, uy=None, method="lockin", interpolation='cubic'):
             else:
                 raise ValueError(f"unsupported interpolation given: {interpolation}")
             
-            for ix in range(tmp.size):
-                tmp[ix] = tmp_f(xnew[ix], ynew[ix])
+            # for ix in range(tmp.size):
+            #     tmp[ix] = tmp_f(xnew[ix], ynew[ix])
+            tmp = tmp_f(xnew, ynew, grid=False)
             A_corr = tmp.reshape(s2, s1)
             return A_corr
-        elif len(A.shape) is 3:
+        elif len(A.shape) == 3:
             for iz, layer in enumerate(A):
                 if(interpolation == 'cubic'):
                     tmp_f = RectBivariateSpline(t1, t2, layer.T, kx=3, ky=3) # cubic kx=ky=3
@@ -1560,8 +1561,9 @@ def driftcorr(A, ux=None, uy=None, method="lockin", interpolation='cubic'):
                 else:
                     raise ValueError(f"unsupported interpolation: {interpolation}")
                 
-                for ix in range(tmp.size):
-                    tmp[ix] = tmp_f(xnew[ix], ynew[ix])
+                # for ix in range(tmp.size):
+                #     tmp[ix] = tmp_f(xnew[ix], ynew[ix])
+                tmp = tmp_f(xnew, ynew, grid=False)
                 A_corr[iz] = tmp.reshape(s2, s1)
                 print('Processing slice %d/%d...' %
                       (iz+1, A.shape[0]), end='\r')
@@ -1570,9 +1572,9 @@ def driftcorr(A, ux=None, uy=None, method="lockin", interpolation='cubic'):
             print('ERR: Input must be 2D or 3D numpy array!')
     elif method is "convolution":
         A_corr = np.zeros_like(A)
-        if len(A.shape) is 2:
+        if len(A.shape) == 2:
             return _apply_drift_field(A, ux=ux, uy=uy, zeroOut=True)
-        elif len(A.shape) is 3:
+        elif len(A.shape) == 3:
             for iz, layer in enumerate(A):
                 A_corr[iz] = _apply_drift_field(
                     layer, ux=ux, uy=uy, zeroOut=True)

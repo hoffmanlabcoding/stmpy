@@ -1140,18 +1140,21 @@ def nsigma_local(data, n=4, N=4, M=4, repeat=1):
 
     def nsigma_local_2D(layer, n, N, M):
         filtered = layer.copy()
+        total_replaced = 0
         for IY in range(N, layer.shape[0], 2*N+1):
             for IX in range(N, layer.shape[1], 2*N+1):
                 local = filtered[max(0, IY-N) : min(layer.shape[0], IY+N+1),
                                  max(0, IX-N) : min(layer.shape[1], IX+N+1)]
                 badPixels = np.where((local > np.mean(local) + n*np.std(local)) |
                                      (local < np.mean(local) - n*np.std(local)) )
+                total_replaced += len(badPixels[0])
                 for ix, iy in zip(badPixels[1], badPixels[0]):
                     neighbors = local[max(0, iy-M) : min(layer.shape[0], iy+M+1),
                                       max(0, ix-M) : min(layer.shape[1], ix+M+1)]
                     mask = (neighbors != local[iy,ix])
                     replacement = np.sum(mask*neighbors) / (neighbors.size - 1.0)
                     filtered[IY-N+iy, IX-N+ix] = replacement
+        print(f"Total bad pixels replaced: {total_replaced}")
         return filtered
 
     filteredData = data.copy()
@@ -1482,6 +1485,8 @@ def linecut(data, p0, p1, width=1, dl=1, dw=1, kind='linear',
         (wx00, wx01), (wy00, wy01) = get_perp_line(p0[0], p0[1], theta, width)
         (wx10, wx11), (wy10, wy11) = get_perp_line(p1[0], p1[1], theta, width)
         ax.plot([p0[0],p1[0]], [p0[1],p1[1]], 'k--', **kwarg)
+        ax.plot([wx00,wx10], [wy00,wy10], 'k--', **kwarg)
+        ax.plot([wx01,wx11], [wy01,wy11], 'k--', **kwarg)
         ax.plot([wx00,wx01], [wy00,wy01], 'k:', **kwarg)
         ax.plot([wx10,wx11], [wy10,wy11], 'k:', **kwarg)
     return r, cut
