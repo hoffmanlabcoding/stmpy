@@ -7,7 +7,7 @@ import numpy as np
 import os
 import matplotlib as mpl
 #import scipy.interpolate as sin  #this is a stupid name for this package...
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, NearestNDInterpolator, RectBivariateSpline
 import scipy.optimize as opt
 import scipy.ndimage as snd
 from scipy.signal import butter, filtfilt, fftconvolve, hilbert, correlate, windows
@@ -35,35 +35,85 @@ def interp2d(x, y, z, kind='nearest', **kwargs):
 
     History:
         2017-08-24  - HP : Initial commit.
+        2026-05-16  - DTL: Modernized version courtesy of Claude 4.6 Sonnet
+                      Fixes deprecation of interp2d, 
+                      'is' vs '=='
+                      RectBivariateSpline returns for scalar inputs
     '''
-    from scipy.interpolate import NearestNDInterpolator
-    if kind is 'nearest':
-        X, Y = np.meshgrid(x ,y)
+    if kind == 'nearest':  # fix: == not is
+        X, Y = np.meshgrid(x, y)
         points = np.array([X.flatten(), Y.flatten()]).T
         values = z.flatten()
         fActual = NearestNDInterpolator(points, values)
+
         def fCall(x, y):
-            if type(x) is not np.ndarray:
-                lx = 1
-            else:
-                lx = x.shape[0]
-            if type(y) is not np.ndarray:
-                ly = 1
-            else:
-                ly = y.shape[0]
-            X, Y = np.meshgrid(x ,y)
+            scalar_input = np.isscalar(x) and np.isscalar(y)  # fix: robust scalar check
+            x = np.atleast_1d(x)
+            y = np.atleast_1d(y)
+            X, Y = np.meshgrid(x, y)
             points = np.array([X.flatten(), Y.flatten()]).T
-            values = fActual(points)
-            return values.reshape(lx, ly)
+            values = fActual(points).reshape(len(x), len(y))
+            return values.item() if scalar_input else values  # fix: return scalar when appropriate
         return fCall
+
+    elif kind == 'cubic':  # fix: if/elif/else
+        return RectBivariateSpline(x, y, z.T, kx=3, ky=3)
+    elif kind == 'linear':
+        return RectBivariateSpline(x, y, z.T, kx=1, ky=1)
     else:
-        from scipy.interpolate import RectBivariateSpline
-        if(kind == 'cubic'):
-            return RectBivariateSpline(x, y, z.T, kx=3, ky=3) # cubic kx=ky=3
-        if(kind == 'linear'):
-            return RectBivariateSpline(x, y, z.T, kx=1, ky=1) # linear kx=ky=1
-        else:
-            raise ValueError(f"unsupported interpolation given: {kind}")
+        raise ValueError(f"unsupported interpolation given: {kind}")
+
+# def interp2d(x, y, z, kind='nearest', **kwargs):
+#     '''
+#     An extension for scipy.interpolate.interp2d() which adds a 'nearest'
+#     neighbor interpolation.
+
+#     See help(scipy.interpolate.interp2d) for details.
+
+#     Inputs:
+#         x       - Required : Array contining x values for data points.
+#         y       - Required : Array contining y values for data points.
+#         z       - Required : Array contining z values for data points.
+#         kind    - Optional : Sting for interpolation scheme. Options are:
+#                              'nearest', 'linear', 'cubic', 'quintic'.  Note
+#                              that 'linear', 'cubic', 'quintic' use spline.
+#         **kwargs - Optional : Keyword arguments passed to
+#                               scipy.interpolate.interp2d
+
+#     Returns:
+#         f(x,y) - Callable function which will return interpolated values.
+
+#     History:
+#         2017-08-24  - HP : Initial commit.
+#     '''
+#     from scipy.interpolate import NearestNDInterpolator
+#     if kind is 'nearest':
+#         X, Y = np.meshgrid(x ,y)
+#         points = np.array([X.flatten(), Y.flatten()]).T
+#         values = z.flatten()
+#         fActual = NearestNDInterpolator(points, values)
+#         def fCall(x, y):
+#             if type(x) is not np.ndarray:
+#                 lx = 1
+#             else:
+#                 lx = x.shape[0]
+#             if type(y) is not np.ndarray:
+#                 ly = 1
+#             else:
+#                 ly = y.shape[0]
+#             X, Y = np.meshgrid(x ,y)
+#             points = np.array([X.flatten(), Y.flatten()]).T
+#             values = fActual(points)
+#             return values.reshape(lx, ly)
+#         return fCall
+#     else:
+#         from scipy.interpolate import RectBivariateSpline
+#         if(kind == 'cubic'):
+#             return RectBivariateSpline(x, y, z.T, kx=3, ky=3) # cubic kx=ky=3
+#         if(kind == 'linear'):
+#             return RectBivariateSpline(x, y, z.T, kx=1, ky=1) # linear kx=ky=1
+#         else:
+#             raise ValueError(f"unsupported interpolation given: {kind}")
         
 
 def azimuthalAverage(F, x0, y0, r, theta=np.linspace(0,2*np.pi,500),
@@ -1455,12 +1505,14 @@ def linecut(data, p0, p1, width=1, dl=1, dw=1, kind='linear',
         return (wx0, wx1), (wy0, wy1)
 
     def cutter(F, p0, p1, dw):
+        '''2026-05-16: replaced with vectorized version that fixes ValueError'''
         l, __, xtot, ytot = calc_length(p0, p1, dw)
-        cut = np.zeros(int(np.ceil(l+dw)))
-        for ix, (x,y) in enumerate(zip(xtot, ytot)):
-            cut[ix] = F(x,y)
-        return cut
-
+        if isinstance(F, RectBivariateSpline):
+            return F(xtot, ytot, grid=False)  # vectorized, returns 1D array
+        else:
+            # nearest neighbor path
+            return np.array([F(x, y) for x, y in zip(xtot, ytot)])
+    
     def linecut2D(layer, p0, p1, width, dl, dw):
         xAll, yAll = np.arange(layer.shape[1]), np.arange(layer.shape[0])
         F = interp2d(xAll, yAll, layer, kind=kind)
