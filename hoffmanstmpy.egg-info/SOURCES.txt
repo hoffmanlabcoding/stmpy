@@ -8,12 +8,16 @@ hoffmanstmpy.egg-info/SOURCES.txt
 hoffmanstmpy.egg-info/dependency_links.txt
 hoffmanstmpy.egg-info/requires.txt
 hoffmanstmpy.egg-info/top_level.txt
+stmpy/Landau.py
 stmpy/__init__.py
 stmpy/cv.py
 stmpy/driftcorr.py
+stmpy/fano.py
 stmpy/image.py
 stmpy/io.py
+stmpy/ldosViewer.py
 stmpy/matio.py
+stmpy/random_aux.py
 stmpy/read_STMView.py
 stmpy/read_all.py
 stmpy/tools.py

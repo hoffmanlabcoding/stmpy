@@ -1017,13 +1017,11 @@ def load_sm4(filePath, single_point_spectra=False):
         self.en = f[0].coords[1][1]
  
     self.order = np.argsort(self.en)
-
     self.en = self.en[self.order]
-     
 
     if _make_attr(self, 'LIY', [liy], 'data'):
         if single_point_spectra:
-            self.LIY = self.LIY
+            self.LIY = self.LIY[:, self.order]
         else:
             # print(self.LIY.shape)
             self.LIY = ensure_square(self.LIY)[:, ::-1, ::-1][self.order]
@@ -1056,7 +1054,7 @@ def load_sm4(filePath, single_point_spectra=False):
 
     if _make_attr(self, 'I', [i], 'data'):
         if single_point_spectra:
-            self.I = self.I
+            self.I = self.I[:, self.order]
         else:
             self.I = ensure_square(self.I)[:, ::-1, ::-1][self.order]
             self.iv = np.mean(self.I,  axis=0)
