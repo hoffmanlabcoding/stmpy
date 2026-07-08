@@ -29,7 +29,7 @@ def plot_FFT_data(data,
                   k_box_size=None,    # e.g. (nx, ny) to define box
                   cmap=stmpy.cm.gray_r,  # colormap
                   clim=None,                 # e.g. (vmin, vmax) to force limits
-                  sigma=3,                 # default: +/- 2 std
+                  sigma=3,                 
                   center='mean',             # 'mean', 0, or a numeric value
                   prc=None,                  # e.g. (1, 99) to use percentiles instead of std
                   ax=None,
@@ -39,7 +39,7 @@ def plot_FFT_data(data,
                   scalebar=None,
                   
                   ):
-    
+
     arr = np.asarray(data)
     if arr.ndim != 2:
         raise ValueError("`data` must be a 2D array.")
@@ -92,9 +92,10 @@ def plot_FFT_data(data,
 
     ax.imshow(arr, origin='lower', cmap=cmap, clim=clim, interpolation='none')
     if add_colorbar:
+        
         stmpy.image.add_colorbar(ax=ax, loc=0, label='FFT Amplitude', fs=8)
     if scalebar is not None:
-        stmpy.image.add_scale_bar(scalebar[0], scalebar[1], scalebar[2], ax=ax, unit='Å^{-1}', color='black', barheight=1e-3)
+        stmpy.image.add_scale_bar(scalebar[0], scalebar[1], scalebar[2], ax=ax, fs=12, unit='Å^{-1}', color='black', barheight=1e-3)
     # ax.set_axis_off()
     ax.set_xticks([])
     ax.set_yticks([])
@@ -176,18 +177,22 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                              r_box_center=None,
                              r_box_size=None,
                              idx= None, 
-                             add_colorbar=False, 
+                             add_colorbar=True, 
                              colorbar_range=None,
                              colorbar_range_FFT=None,
                              colorbar_range_ps=None,
+                             k_kept_n_ratio = 6.3,
                              add_label=True,
                              sym=None,
                              savepath=None, 
                              savepath2=None,
                              smooth_window=10,
-                             savename=None, make_plots=True, show=True, return_figs=False, silent=True, RHK_format=True):
+                             savename=None, make_plots=True, show=True, 
+                             return_figs=False, silent=True, RHK_format=True,
+                             lateral_calibration_factor = 1,
+                             z_calibration_factor = 1):
 
-    scan_size = data.scan_info['scan_size']  # in nm
+    scan_size = data.scan_info['scan_size'] * lateral_calibration_factor  # in nm
     n_pixels = data.scan_info['n_pixels']    
     set_current = data.scan_info['set_current']  # in pA
     set_voltage = data.scan_info['set_voltage']  # in V
@@ -196,16 +201,19 @@ def add_corrections_and_plot(data, dos_map: bool = False,
     FFT_scan_size = delta_q * n_pixels # in armstrong^-1
 
     figs = {}
-
+    data.Z = data.Z * z_calibration_factor  # Apply z calibration factor
+    
     # --- Topography corrections ---
     data.Z_gc, data.Z_lc, data.Z_ls, data.FZ_ls, data.Z_ps, data.FZ_ps = _process_pipeline(data.Z)
     data.FZ_ls = stmpy.tools.fft(data.Z_ls, zeroDC=True, window='hanning', units='amplitude', output='absolute')
-    k_kept_n = 256/60 * scan_size;
+    
+    k_kept_n = k_kept_n_ratio * scan_size
     k_crop_n = int(0.5 * (n_pixels - k_kept_n))  # crop 10 nm in FFT
     # print(k_kept_n,k_crop_n)
     k_crop_n = 0 if k_crop_n < 0 else k_crop_n
     
     if hasattr(data, "Z_BWD"):
+        data.Z_BWD = data.Z_BWD * z_calibration_factor 
         data.Z_BWD_gc, data.Z_BWD_lc, data.Z_BWD_ls, data.FZ_BWD_ls, data.Z_BWD_ps, data.FZ_BWD_ps = _process_pipeline(data.Z_BWD)
         data.FZ_BWD_ls = stmpy.tools.fft(data.Z_BWD_ls, zeroDC=True, window='hanning', units='amplitude', output='absolute')
         if make_plots:
@@ -254,7 +262,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                             stmpy.image.add_colorbar(ax=ax_topo[i,j], label='Topography (m)', fs=8)
                         if add_label:
                             stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i,j], fs=8)
-            print(k_crop_n)
+   
             plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[0,5], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
                           scalebar = [1, FFT_scan_size, n_pixels])
             plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[0,6], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
@@ -289,9 +297,9 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                     if add_label:
                             stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i], fs=8)
 
-            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[5], clim=colorbar_range_FFT,
+            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[5], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
                           scalebar = [1, FFT_scan_size, n_pixels])
-            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[6], clim=colorbar_range_FFT,
+            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[6], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
                           scalebar = [1, FFT_scan_size, n_pixels])
 
     if make_plots:
