@@ -3413,14 +3413,14 @@ def split_fourier_circles(data, points, radius, mirror=True,
         # overlay mask lightly
         ax[0, 1].imshow(mask, cmap='Reds', origin='lower', alpha=0.25)
 
-        # draw circles (convert 1..W/1..H -> imshow coords 0..W-1/0..H-1)
+        # draw circles at the peak pixel coords (0-indexed, matching the mask)
         for (px, py) in pts:
-            circ = patches.Circle((px - 1.0, py - 1.0), radius,
+            circ = patches.Circle((px, py), radius,
                                   fill=False, ec='cyan', lw=1.2)
             ax[0, 1].add_patch(circ)
         if mirror:
             for (px, py) in pts_m:
-                circ = patches.Circle((px - 1.0, py - 1.0), radius,
+                circ = patches.Circle((px, py), radius,
                                   fill=False, ec='red', lw=1.2)
                 ax[0, 1].add_patch(circ)
         plt.colorbar(im1, ax=ax[0, 1], fraction=0.046, pad=0.04)

@@ -7,8 +7,10 @@ import rhk_sm4.rhk_sm4 as sm4
 
 import matplotlib.pyplot as plt
 import numpy as np
-
-from scipy.integrate import cumtrapz, trapz
+try:
+    from scipy.integrate import cumtrapz, trapz
+except ImportError:
+    from scipy.integrate import cumulative_trapezoid as cumtrapz, trapezoid as trapz
 
 from importlib import reload
 
@@ -29,7 +31,7 @@ def plot_FFT_data(data,
                   k_box_size=None,    # e.g. (nx, ny) to define box
                   cmap=stmpy.cm.gray_r,  # colormap
                   clim=None,                 # e.g. (vmin, vmax) to force limits
-                  sigma=3,                 
+                  sigma=5,                 
                   center='mean',             # 'mean', 0, or a numeric value
                   prc=None,                  # e.g. (1, 99) to use percentiles instead of std
                   ax=None,
@@ -111,21 +113,149 @@ def plot_FFT_data(data,
         fig.savefig(savename)
     return fig, ax
 
-def _process_pipeline(Z, window_type='hanning'):
-    
-    Z_gc = stmpy.tools.nsigma_global(Z, n=4, M=5, repeat=100)
-    Z_lc = stmpy.tools.nsigma_local(Z_gc, n=5, N=4, M=5, repeat=50)
+def _robust_line_subtract(Z, order=1, n_sigma=2.5, n_iter=3, min_frac=0.3):
+    '''Line-by-line polynomial background subtraction that ignores bright/dark
+    outliers (adsorbates, defects, bad pixels) when estimating each line's
+    background.
 
-    Z_ls = stmpy.tools.lineSubtract(Z_lc, 2)
-    Z_ps = stmpy.tools.plane_subtract(Z_lc, 2, include_cross_terms=True, preserve_units=True)
+    Plain lineSubtract fits every pixel in a row, so a bright feature drags the
+    polynomial upward and the rest of that row gets over-subtracted, leaving a
+    dark streak/halo around the feature. Here each row is fit iteratively:
+    after each fit, pixels whose residual exceeds n_sigma * (robust MAD-based
+    sigma) are masked out and the fit is repeated, so only the true background
+    sets the baseline. The full row (features included) is then subtracted by
+    that background fit.
+
+    Inputs:
+        Z        - 2D numpy array (rows = fast scan lines).
+        order    - Polynomial order fit to each line (default 1).
+        n_sigma  - Residual threshold in robust sigma to mask a pixel (default 2.5).
+        n_iter   - Max refit iterations per line (default 3).
+        min_frac - Min fraction of a line that must stay unmasked to trust the
+                   refit; below this the previous fit is kept (default 0.3).
+
+    Returns:
+        2D array with the per-line background removed.
+    '''
+    Z = np.asarray(Z, dtype=float)
+    out = np.empty_like(Z)
+    ncol = Z.shape[-1]
+    x = np.linspace(0.0, 1.0, ncol)
+    min_pts = max(order + 1, int(min_frac * ncol))
+    for i, line in enumerate(Z):
+        good = np.isfinite(line)
+        if good.sum() < min_pts:
+            out[i] = line - np.nanmean(line)
+            continue
+        coeffs = np.polyfit(x[good], line[good], order)
+        for _ in range(n_iter):
+            resid = line - np.polyval(coeffs, x)
+            med = np.median(resid[good])
+            mad = np.median(np.abs(resid[good] - med))
+            sigma = 1.4826 * mad
+            if sigma == 0:
+                break
+            new_good = np.isfinite(line) & (np.abs(resid - med) < n_sigma * sigma)
+            if new_good.sum() < min_pts or np.array_equal(new_good, good):
+                break
+            good = new_good
+            coeffs = np.polyfit(x[good], line[good], order)
+        out[i] = line - np.polyval(coeffs, x)
+    return out
+
+
+def _destripe_rows(Z, n_iter=1):
+    '''Remove residual horizontal stripes (row-to-row offset noise) by
+    "median of differences" row alignment.
+
+    Line-by-line leveling reduces but doesn't fully remove the small,
+    scan-to-scan vertical offset each fast-scan row carries; the leftover shows
+    up as faint horizontal stripes. Walking down the rows, this subtracts from
+    each row the running sum of the median difference to the row above it, so
+    consecutive rows are brought onto a common level. Because the offset is
+    estimated from the *median* over the whole row, localized features
+    (adatoms), which are a minority of the pixels, don't bias it -- real
+    structure is preserved while the common per-row offset is removed.
+
+    Inputs:
+        Z       - 2D numpy array (rows = fast scan lines; stripes run horizontally).
+        n_iter  - Number of alignment passes (default 1; 2 can help stubborn stripes).
+
+    Returns:
+        2D array with per-row offsets aligned and the global median re-zeroed.
+    '''
+    out = np.asarray(Z, dtype=float).copy()
+    nrow = out.shape[0]
+    for _ in range(max(1, int(n_iter))):
+        offsets = np.zeros(nrow)
+        for i in range(1, nrow):
+            diff = out[i] - out[i - 1]
+            diff = diff[np.isfinite(diff)]
+            offsets[i] = offsets[i - 1] + (np.median(diff) if diff.size else 0.0)
+        out = out - offsets[:, None]
+    out = out - np.nanmedian(out)
+    return out
+
+
+def _background_clim(img, pct=(1, 99), exclude_adatoms=True, adatom_sigma=3.0):
+    '''Color limits (vmin, vmax) computed from the background only.
+
+    A surface covered in adatoms otherwise stretches the color scale to the
+    adatoms' height and washes out the subtle background corrugation. When
+    exclude_adatoms is True, pixels brighter than
+    median + adatom_sigma * (MAD-based sigma) are flagged as adatoms and dropped
+    before the percentile range is taken, so the color scale spans the
+    background and the adatoms simply saturate at the top of the colormap.
+
+    The median/MAD are robust to a large adatom coverage (they hold as long as
+    adatoms occupy < ~50% of the frame), so detection is automatic and needs no
+    hand-tuned threshold.
+
+    Inputs:
+        img             - 2D numpy array (already leveled, e.g. Z_ls or Z_ps).
+        pct             - (low, high) percentiles used for the color limits.
+        exclude_adatoms - If True, drop bright-outlier (adatom) pixels first.
+        adatom_sigma    - Robust-sigma cutoff above the median for flagging adatoms.
+
+    Returns:
+        [vmin, vmax] numpy array for imshow(clim=...), or None if img is empty.
+    '''
+    flat = np.asarray(img, dtype=float).ravel()
+    flat = flat[np.isfinite(flat)]
+    if flat.size == 0:
+        return None
+    if exclude_adatoms:
+        med = np.median(flat)
+        mad = np.median(np.abs(flat - med))
+        sigma = 1.4826 * mad
+        if sigma > 0:
+            bg = flat[flat <= med + adatom_sigma * sigma]
+            if bg.size >= 0.2 * flat.size:   # keep only if plenty of background remains
+                flat = bg
+    return np.nanpercentile(flat, list(pct))
+
+
+def _process_pipeline(Z, window_type='hanning', ls_order=2, ps_order=2, n_sigma_correction=5,
+                      ls_robust=True, ls_n_sigma=2.5, ls_n_iter=3, destripe=True, destripe_iter=1):
+    
+    Z_gc = stmpy.tools.nsigma_global(Z, n=n_sigma_correction, M=5, repeat=100)
+    Z_lc = stmpy.tools.nsigma_local(Z_gc, n=n_sigma_correction, N=4, M=5, repeat=50)
+
+    if ls_robust:
+        Z_ls = _robust_line_subtract(Z_lc, order=ls_order, n_sigma=ls_n_sigma, n_iter=ls_n_iter)
+    else:
+        Z_ls = stmpy.tools.lineSubtract(Z_lc, ls_order)
+    if destripe:
+        Z_ls = _destripe_rows(Z_ls, n_iter=destripe_iter)
+    Z_ps = stmpy.tools.plane_subtract(Z_lc, ps_order, include_cross_terms=True, preserve_units=True)
     FZ_ls = stmpy.tools.fft(Z_lc, zeroDC=True, window=window_type, units='amplitude', output='absolute')
     FZ_ps = stmpy.tools.fft(Z_ps, zeroDC=True, window=window_type, units='amplitude', output='absolute')
     return Z_gc, Z_lc, Z_ls, FZ_ls, Z_ps, FZ_ps
 
-def _process_pipeline_LIY(data,smooth_window=10, window_type='hanning'):
+def _process_pipeline_LIY(data,smooth_window=10, window_type='hanning', repeat=2, n_sigma_correction=3):
     data.LIY_smoothed = smooth_LIY(data.LIY, window=smooth_window, axis=0, mode='reflect')
-    data.LIY_gc = stmpy.tools.nsigma_global(data.LIY_smoothed, n=3, M=3, repeat=2)
-    data.LIY_lc = stmpy.tools.nsigma_local(data.LIY_gc, n=3, N=4, M=3, repeat=2)
+    data.LIY_gc = stmpy.tools.nsigma_global(data.LIY_smoothed, n=n_sigma_correction, M=3, repeat=repeat)
+    data.LIY_lc = stmpy.tools.nsigma_local(data.LIY_gc, n=n_sigma_correction, N=4, M=3, repeat=repeat)
     data.I_smoothed = smooth_LIY(data.I, window=smooth_window, axis=0, mode='reflect')
     data.Feenstra = data.LIY / data.I * data.en[:, None, None]
     data.Feenstra_smoothed = data.LIY_smoothed / data.I_smoothed * data.en[:, None, None]
@@ -177,10 +307,20 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                              r_box_center=None,
                              r_box_size=None,
                              idx= None, 
-                             add_colorbar=True, 
+                             ls_order=2,
+                             ps_order=2,
+                             n_sigma_correction=3,
+                             ls_robust=True,
+                             ls_n_sigma=2.5,
+                             ls_n_iter=3,
+                             destripe=True,
+                             destripe_iter=1,
+                             add_colorbar=True,
                              colorbar_range=None,
                              colorbar_range_FFT=None,
                              colorbar_range_ps=None,
+                             exclude_adatoms=True,
+                             adatom_sigma=3.0,
                              k_kept_n_ratio = 6.3,
                              add_label=True,
                              sym=None,
@@ -204,7 +344,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
     data.Z = data.Z * z_calibration_factor  # Apply z calibration factor
     
     # --- Topography corrections ---
-    data.Z_gc, data.Z_lc, data.Z_ls, data.FZ_ls, data.Z_ps, data.FZ_ps = _process_pipeline(data.Z)
+    data.Z_gc, data.Z_lc, data.Z_ls, data.FZ_ls, data.Z_ps, data.FZ_ps = _process_pipeline(data.Z, ls_order=ls_order, ps_order=ps_order, n_sigma_correction=n_sigma_correction, ls_robust=ls_robust, ls_n_sigma=ls_n_sigma, ls_n_iter=ls_n_iter, destripe=destripe, destripe_iter=destripe_iter)
     data.FZ_ls = stmpy.tools.fft(data.Z_ls, zeroDC=True, window='hanning', units='amplitude', output='absolute')
     
     k_kept_n = k_kept_n_ratio * scan_size
@@ -212,9 +352,22 @@ def add_corrections_and_plot(data, dos_map: bool = False,
     # print(k_kept_n,k_crop_n)
     k_crop_n = 0 if k_crop_n < 0 else k_crop_n
     
+    # Default topography color scale computed from the BACKGROUND only: bright
+    # adatoms are detected (median + adatom_sigma * robust sigma) and excluded
+    # before taking the 2nd-98th percentile, so they don't wash out the
+    # underlying corrugation -- the adatoms simply saturate at the top of the
+    # scale. Set exclude_adatoms=False to include them (full-range scaling).
+    # Shared by the FWD and BWD panels for direct comparison.
+    if colorbar_range is None:
+        colorbar_range = _background_clim(data.Z_ls, exclude_adatoms=exclude_adatoms,
+                                          adatom_sigma=adatom_sigma)
+    if colorbar_range_ps is None:
+        colorbar_range_ps = _background_clim(data.Z_ps, exclude_adatoms=exclude_adatoms,
+                                             adatom_sigma=adatom_sigma)
+
     if hasattr(data, "Z_BWD"):
         data.Z_BWD = data.Z_BWD * z_calibration_factor 
-        data.Z_BWD_gc, data.Z_BWD_lc, data.Z_BWD_ls, data.FZ_BWD_ls, data.Z_BWD_ps, data.FZ_BWD_ps = _process_pipeline(data.Z_BWD)
+        data.Z_BWD_gc, data.Z_BWD_lc, data.Z_BWD_ls, data.FZ_BWD_ls, data.Z_BWD_ps, data.FZ_BWD_ps = _process_pipeline(data.Z_BWD, ls_order=ls_order, ps_order=ps_order, n_sigma_correction=n_sigma_correction, ls_robust=ls_robust, ls_n_sigma=ls_n_sigma, ls_n_iter=ls_n_iter, destripe=destripe, destripe_iter=destripe_iter)
         data.FZ_BWD_ls = stmpy.tools.fft(data.Z_BWD_ls, zeroDC=True, window='hanning', units='amplitude', output='absolute')
         if make_plots:
             if sym is not None:
@@ -227,17 +380,18 @@ def add_corrections_and_plot(data, dos_map: bool = False,
             ax_topo_ps_FWD = ax_topo[0,3]
             ax_topo_ls_BWD = ax_topo[1,4]
             ax_topo_ps_BWD = ax_topo[1,3]
+
             ax_topo[0,0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,0].set_title('Raw Z')
             ax_topo[0,1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,1].set_title('Global Corrected Z')
             ax_topo[0,2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,2].set_title('Local Corrected Z')
-            ax_topo_ls_FWD.imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range, interpolation='none'); ax_topo_ls_FWD.set_title('Line Subtracted Z')
-            ax_topo_ps_FWD.imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps, interpolation='none'); ax_topo_ps_FWD.set_title('Plane Subtracted Z')
+            ax_topo_ls_FWD.imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range, interpolation='none'); ax_topo_ls_FWD.set_title(f'Line Subtracted Z (order={ls_order})')
+            ax_topo_ps_FWD.imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps, interpolation='none'); ax_topo_ps_FWD.set_title(f'Plane Subtracted Z (order={ps_order})')
         
             ax_topo[1,0].imshow(data.Z_BWD,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,0].set_title('Raw Z BWD')
             ax_topo[1,1].imshow(data.Z_BWD_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,1].set_title('Global Corrected Z BWD')
             ax_topo[1,2].imshow(data.Z_BWD_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,2].set_title('Local Corrected Z BWD')
-            ax_topo_ls_BWD.imshow(data.Z_BWD_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range, interpolation='none'); ax_topo_ls_BWD.set_title('Line Subtracted Z BWD')
-            ax_topo_ps_BWD.imshow(data.Z_BWD_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps, interpolation='none'); ax_topo_ps_BWD.set_title('Plane Subtracted Z BWD')
+            ax_topo_ls_BWD.imshow(data.Z_BWD_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range, interpolation='none'); ax_topo_ls_BWD.set_title(f'Line Subtracted Z BWD (order={ls_order})')
+            ax_topo_ps_BWD.imshow(data.Z_BWD_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps, interpolation='none'); ax_topo_ps_BWD.set_title(f'Plane Subtracted Z BWD (order={ps_order})')
 
             for i in range(2):
                 for j in range(7):
@@ -319,7 +473,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
         if not hasattr(data, 'LIY'):
             raise AttributeError("dos_map=True but `data.LIY` not found.")
         # Corrections on the full energy stack 
-        _process_pipeline_LIY(data, smooth_window=smooth_window, window_type='hanning')
+        _process_pipeline_LIY(data, smooth_window=smooth_window, window_type='hanning', n_sigma_correction=n_sigma_correction)
     
 
         # Mean over energy

@@ -44,6 +44,69 @@ def fft_log_image(F2):
     return np.log10(mag + 1e-12)
 
 
+def _range_bounds(arr):
+    """Return (min, max, step, [min, max]) for a color-range slider from data."""
+    a = np.asarray(arr, dtype=float)
+    a = a[np.isfinite(a)]
+    if a.size == 0:
+        return 0.0, 1.0, 0.01, [0.0, 1.0]
+    lo = float(np.min(a))
+    hi = float(np.max(a))
+    if hi <= lo:
+        hi = lo + 1.0
+    step = (hi - lo) / 200.0
+    return lo, hi, step, [lo, hi]
+
+
+def _crange_vals(crange):
+    """Turn a RangeSlider [lo, hi] value into (zmin, zmax); (None, None) = autorange."""
+    if crange and len(crange) == 2 and crange[0] is not None and crange[1] is not None:
+        lo, hi = float(crange[0]), float(crange[1])
+        if hi > lo:
+            return lo, hi
+    return None, None
+
+
+def realspace_panel(title, graph_id, slider_id, wrapper_style, graph_h=280, wrapper_id=None):
+    """A real-space image panel with a vertical color-range slider on its right."""
+    wrapper_kwargs = {"style": wrapper_style}
+    if wrapper_id is not None:
+        wrapper_kwargs["id"] = wrapper_id
+    return html.Div(
+        **wrapper_kwargs,
+        children=[
+            html.Div(title, style={"fontSize": "12px", "marginBottom": "2px"}),
+            html.Div(
+                style={"display": "flex", "flexDirection": "row", "alignItems": "flex-start"},
+                children=[
+                    html.Div(
+                        style={"flex": "1", "minWidth": "0"},
+                        children=[
+                            dcc.Graph(id=graph_id, style={"height": f"{graph_h}px"},
+                                      config={"displayModeBar": True}),
+                        ],
+                    ),
+                    html.Div(
+                        style={"width": "50px", "paddingLeft": "2px"},
+                        children=[
+                            html.Div("color", style={"fontSize": "9px", "color": "#888",
+                                                      "textAlign": "center"}),
+                            dcc.RangeSlider(
+                                id=slider_id,
+                                min=0, max=1, step=0.01, value=[0, 1],
+                                vertical=True, verticalHeight=graph_h - 55,
+                                marks=None,
+                                tooltip={"placement": "left", "always_visible": False},
+                                updatemode="mouseup",
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
 # ---------------------------------------------------------------------
 # Global in-memory storage for large arrays
 # ---------------------------------------------------------------------
@@ -225,6 +288,14 @@ app.layout = html.Div(
                     ],
                 ),
 
+                dcc.Checklist(
+                    id="liy-smooth-toggle",
+                    options=[{"label": " Show LIY-S", "value": "show"}],
+                    value=["show"],
+                    style={"fontSize": "12px", "marginLeft": "10px", "whiteSpace": "nowrap"},
+                    inputStyle={"marginRight": "3px"},
+                ),
+
                 html.Div(
                     id="file-info",
                     style={"marginLeft": "10px", "fontStyle": "italic", "color": "#555", "fontSize": "12px"},
@@ -242,26 +313,20 @@ app.layout = html.Div(
         html.Div(
             style={"display": "flex", "flexDirection": "row", "height": "300px"},
             children=[
-                html.Div(style={"flex": "1", "marginRight": "4px"}, children=[
-                    html.Div("Topo (LDOS)", style={"fontSize": "12px", "marginBottom": "2px"}),
-                    dcc.Graph(id="topo-graph", style={"height": "280px"}, config={"displayModeBar": True}),
-                ]),
+                realspace_panel("Topo (LDOS)", "topo-graph", "topo-crange",
+                                {"flex": "1", "marginRight": "4px"}),
                 html.Div(style={"flex": "1", "margin": "0 4px"}, children=[
                     html.Div("FFT (FZ_ls)", style={"fontSize": "12px", "marginBottom": "2px"}),
                     dcc.Graph(id="fzfft-graph", style={"height": "280px"}, config={"displayModeBar": True}),
                 ]),
-                html.Div(style={"flex": "1", "margin": "0 4px"}, children=[
-                    html.Div("LIY (smoothed)", style={"fontSize": "12px", "marginBottom": "2px"}),
-                    dcc.Graph(id="liy-smooth-graph", style={"height": "280px"}, config={"displayModeBar": True}),
-                ]),
+                realspace_panel("LIY (smoothed)", "liy-smooth-graph", "liy-smooth-crange",
+                                {"flex": "1", "margin": "0 4px"}, wrapper_id="liy-smooth-panel"),
                 html.Div(style={"flex": "1", "margin": "0 4px"}, children=[
                     html.Div("FFT (FLIY_smoothed)", style={"fontSize": "12px", "marginBottom": "2px"}),
                     dcc.Graph(id="fft-graph", style={"height": "280px"}, config={"displayModeBar": True}),
                 ]),
-                html.Div(style={"flex": "1", "marginLeft": "4px"}, children=[
-                    html.Div("High-res topo (Z_ls)", style={"fontSize": "12px", "marginBottom": "2px"}),
-                    dcc.Graph(id="topo-hires-graph", style={"height": "280px"}, config={"displayModeBar": True}),
-                ]),
+                realspace_panel("High-res topo (Z_ls)", "topo-hires-graph", "topo-hires-crange",
+                                {"flex": "1", "marginLeft": "4px"}),
             ],
         ),
 
@@ -289,10 +354,8 @@ app.layout = html.Div(
         html.Div(
             style={"display": "flex", "flexDirection": "row", "height": "320px", "marginTop": "6px"},
             children=[
-                html.Div(style={"flex": "1", "marginRight": "6px"}, children=[
-                    html.Div("LIY_norm", style={"fontSize": "12px", "marginBottom": "2px"}),
-                    dcc.Graph(id="liy-norm-graph", style={"height": "300px"}, config={"displayModeBar": True}),
-                ]),
+                realspace_panel("LIY_norm", "liy-norm-graph", "liy-norm-crange",
+                                {"flex": "1", "marginRight": "6px"}, graph_h=300),
                 html.Div(style={"flex": "1", "margin": "0 6px"}, children=[
                     html.Div("FFT (FLIY_norm)", style={"fontSize": "12px", "marginBottom": "2px"}),
                     dcc.Graph(id="fft-norm-graph", style={"height": "300px"}, config={"displayModeBar": True}),
@@ -319,6 +382,14 @@ app.layout = html.Div(
     Output("energy-slider", "value"),
     Output("norm-e1", "value"),
     Output("norm-e2", "value"),
+    Output("topo-crange", "min"),
+    Output("topo-crange", "max"),
+    Output("topo-crange", "step"),
+    Output("topo-crange", "value"),
+    Output("liy-smooth-crange", "min"),
+    Output("liy-smooth-crange", "max"),
+    Output("liy-smooth-crange", "step"),
+    Output("liy-smooth-crange", "value"),
     Input("upload-data", "contents"),
     State("upload-data", "filename"),
     prevent_initial_call=True,
@@ -361,7 +432,13 @@ def handle_upload(contents, filename):
         e1_default = e_min + 0.25 * (e_max - e_min)
         e2_default = e_min + 0.75 * (e_max - e_min)
 
-    return data_store, info, emin, emax, e0, e1_default, e2_default
+    # color-range slider bounds for topo (low-res) and LIY smoothed (full stack)
+    t_lo, t_hi, t_step, t_val = _range_bounds(GLOBAL_DATA["topo"])
+    l_lo, l_hi, l_step, l_val = _range_bounds(GLOBAL_DATA["LIY_smooth"])
+
+    return (data_store, info, emin, emax, e0, e1_default, e2_default,
+            t_lo, t_hi, t_step, t_val,
+            l_lo, l_hi, l_step, l_val)
 
 
 # ---------------------------------------------------------------------
@@ -369,6 +446,10 @@ def handle_upload(contents, filename):
 # ---------------------------------------------------------------------
 @app.callback(
     Output("hires-store", "data"),
+    Output("topo-hires-crange", "min"),
+    Output("topo-hires-crange", "max"),
+    Output("topo-hires-crange", "step"),
+    Output("topo-hires-crange", "value"),
     Input("upload-topo-hires", "contents"),
     State("upload-topo-hires", "filename"),
     prevent_initial_call=True,
@@ -381,7 +462,22 @@ def handle_hires_upload(contents, filename):
     I_hr, J_hr = topo_high.shape
 
     GLOBAL_DATA["topo_high"] = topo_high
-    return {"I": int(I_hr), "J": int(J_hr)}
+    h_lo, h_hi, h_step, h_val = _range_bounds(topo_high)
+    return {"I": int(I_hr), "J": int(J_hr)}, h_lo, h_hi, h_step, h_val
+
+
+# ---------------------------------------------------------------------
+# Toggle: show / hide the LIY (smoothed) panel
+# ---------------------------------------------------------------------
+@app.callback(
+    Output("liy-smooth-panel", "style"),
+    Input("liy-smooth-toggle", "value"),
+)
+def toggle_liy_smooth_panel(value):
+    base = {"flex": "1", "margin": "0 4px"}
+    if not value or "show" not in value:
+        base["display"] = "none"
+    return base
 
 
 # ---------------------------------------------------------------------
@@ -407,6 +503,10 @@ def update_energy_label(e_idx, data_store):
 @app.callback(
     Output("norm-store", "data"),
     Output("norm-status", "children"),
+    Output("liy-norm-crange", "min"),
+    Output("liy-norm-crange", "max"),
+    Output("liy-norm-crange", "step"),
+    Output("liy-norm-crange", "value"),
     Input("data-store", "data"),
     Input("norm-e1", "value"),
     Input("norm-e2", "value"),
@@ -417,7 +517,8 @@ def recompute_norm(data_store, E1, E2):
         raise dash.exceptions.PreventUpdate
 
     if E1 is None or E2 is None:
-        return dash.no_update, "set E1/E2"
+        return (dash.no_update, "set E1/E2",
+                dash.no_update, dash.no_update, dash.no_update, dash.no_update)
 
     en = GLOBAL_DATA["en"]
     LIY_sm = GLOBAL_DATA["LIY_smooth"]
@@ -439,7 +540,10 @@ def recompute_norm(data_store, E1, E2):
     GLOBAL_DATA["FLIY_norm"] = np.asarray(FLIY_norm)
     GLOBAL_DATA["area_map"] = np.asarray(area_map)
 
-    return {"E1": E1c, "E2": E2c}, f"ok: [{E1c:.4f}, {E2c:.4f}] V"
+    n_lo, n_hi, n_step, n_val = _range_bounds(GLOBAL_DATA["LIY_norm"])
+
+    return ({"E1": E1c, "E2": E2c}, f"ok: [{E1c:.4f}, {E2c:.4f}] V",
+            n_lo, n_hi, n_step, n_val)
 
 
 # ---------------------------------------------------------------------
@@ -622,9 +726,10 @@ def update_selected_point(topo_click, smooth_click, norm_click, hires_click, dat
     Input("data-store", "data"),
     Input("fov-store", "data"),
     Input("selected-point-store", "data"),
+    Input("topo-crange", "value"),
     prevent_initial_call=True,
 )
-def update_topo(data_store, fov, selected_point):
+def update_topo(data_store, fov, selected_point, crange):
     if GLOBAL_DATA["topo"] is None or data_store is None:
         return go.Figure()
 
@@ -640,11 +745,13 @@ def update_topo(data_store, fov, selected_point):
     y = np.arange(i0, i0 + Ii)
 
     show_cb = False
+    zmin, zmax = _crange_vals(crange)
 
     fig = go.Figure(
         data=[go.Heatmap(
             z=topo_crop, x=x, y=y,
             colorscale=colorscale,
+            zmin=zmin, zmax=zmax,
             colorbar=maybe_colorbar("Z_ls", show_cb),
         )]
     )
@@ -679,9 +786,10 @@ def update_topo(data_store, fov, selected_point):
     Input("fov-store", "data"),
     Input("energy-slider", "value"),
     Input("selected-point-store", "data"),
+    Input("liy-smooth-crange", "value"),
     prevent_initial_call=True,
 )
-def update_liy_smooth(data_store, fov, e_idx, selected_point):
+def update_liy_smooth(data_store, fov, e_idx, selected_point, crange):
     if GLOBAL_DATA["LIY_smooth"] is None or data_store is None:
         return go.Figure()
 
@@ -701,11 +809,13 @@ def update_liy_smooth(data_store, fov, e_idx, selected_point):
 
     colorscale = mpl_to_plotly(stmpy.cm.Blues_r)
     show_cb = False
+    zmin, zmax = _crange_vals(crange)
 
     fig = go.Figure(
         data=[go.Heatmap(
             z=liy_slice, x=x, y=y,
             colorscale=colorscale,
+            zmin=zmin, zmax=zmax,
             colorbar=maybe_colorbar("LIY_s", show_cb),
         )]
     )
@@ -859,9 +969,10 @@ def update_fft(data_store, e_idx):
     Input("hires-store", "data"),
     Input("fov-store", "data"),
     Input("selected-point-store", "data"),
+    Input("topo-hires-crange", "value"),
     prevent_initial_call=True,
 )
-def update_topo_hires(hires_store, fov, selected_point):
+def update_topo_hires(hires_store, fov, selected_point, crange):
     if GLOBAL_DATA["topo_high"] is None or hires_store is None:
         return go.Figure()
 
@@ -877,11 +988,13 @@ def update_topo_hires(hires_store, fov, selected_point):
 
     colorscale = mpl_to_plotly(stmpy.cm.Blues_r)
     show_cb = False
+    zmin, zmax = _crange_vals(crange)
 
     fig = go.Figure(
         data=[go.Heatmap(
             z=topo_crop, x=x, y=y,
             colorscale=colorscale,
+            zmin=zmin, zmax=zmax,
             colorbar=maybe_colorbar("Z_ls", show_cb),
         )]
     )
@@ -917,9 +1030,10 @@ def update_topo_hires(hires_store, fov, selected_point):
     Input("fov-store", "data"),
     Input("energy-slider", "value"),
     Input("selected-point-store", "data"),
+    Input("liy-norm-crange", "value"),
     prevent_initial_call=True,
 )
-def update_liy_norm(data_store, norm_store, fov, e_idx, selected_point):
+def update_liy_norm(data_store, norm_store, fov, e_idx, selected_point, crange):
     if GLOBAL_DATA["LIY_norm"] is None or data_store is None or norm_store is None:
         return go.Figure()
 
@@ -939,11 +1053,13 @@ def update_liy_norm(data_store, norm_store, fov, e_idx, selected_point):
 
     colorscale = mpl_to_plotly(stmpy.cm.Blues_r)
     show_cb = True
+    zmin, zmax = _crange_vals(crange)
 
     fig = go.Figure(
         data=[go.Heatmap(
             z=liy_slice, x=x, y=y,
             colorscale=colorscale,
+            zmin=zmin, zmax=zmax,
             colorbar=maybe_colorbar("LIY_n", show_cb),
         )]
     )
