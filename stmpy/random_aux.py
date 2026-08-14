@@ -25,13 +25,35 @@ from scipy.optimize import curve_fit, OptimizeWarning
 from tqdm import tqdm  # For a progress bar
 import warnings
 
-def plot_FFT_data(data, 
+def nice_scale_bar(extent, frac=0.25, nice=(1, 2, 5)):
+    '''Pick a scale bar length that looks right for the displayed extent.
+
+    Returns the value from the `nice` decade series (e.g. ..., 0.5, 1, 2,
+    5, 10, 20, ...) closest in ratio to frac * extent, so the bar is always
+    a round number spanning roughly `frac` of the image width.
+
+    Inputs:
+        extent  - Required : Displayed field of view, in the same units the
+                             scale bar will be labeled with (nm, 1/Angstrom, ...).
+        frac    - Optional : Target bar length as a fraction of extent.
+        nice    - Optional : Allowed mantissas. Use (1, 2, 2.5, 5) for k-space.
+    '''
+    if not np.isfinite(extent) or extent <= 0:
+        return 1
+    target = frac * extent
+    candidates = [n * 10.0**e for e in range(-3, 7) for n in nice]
+    best = min(candidates, key=lambda c: abs(np.log(c / target)))
+    best = float(f'{best:.10g}')
+    return int(best) if float(best).is_integer() else best
+
+
+def plot_FFT_data(data,
                   k_crop_n = 0, 
                   k_box_center=None,  # e.g. (x, y) to center a box
                   k_box_size=None,    # e.g. (nx, ny) to define box
                   cmap=stmpy.cm.gray_r,  # colormap
                   clim=None,                 # e.g. (vmin, vmax) to force limits
-                  sigma=5,                 
+                  sigma=8,                 
                   center='mean',             # 'mean', 0, or a numeric value
                   prc=None,                  # e.g. (1, 99) to use percentiles instead of std
                   ax=None,
@@ -87,9 +109,9 @@ def plot_FFT_data(data,
         return max(lo, np.nanmin(x)), min(hi, np.nanmax(x))
 
     # inside plot_FFT_data(...)
-    if clim is None:
-        if sigma is not None:
-            clim = _auto_clim(arr, sigma=sigma, center=center, prc=prc)
+    # if clim is None:
+        # if sigma is not None:
+        #     clim = _auto_clim(arr, sigma=sigma, center=center, prc=prc)
 
 
     ax.imshow(arr, origin='lower', cmap=cmap, clim=clim, interpolation='none')
@@ -236,7 +258,7 @@ def _background_clim(img, pct=(1, 99), exclude_adatoms=True, adatom_sigma=3.0):
 
 
 def _process_pipeline(Z, window_type='hanning', ls_order=2, ps_order=2, n_sigma_correction=5,
-                      ls_robust=True, ls_n_sigma=2.5, ls_n_iter=3, destripe=True, destripe_iter=1):
+                      ls_robust=True, ls_n_sigma=2.5, ls_n_iter=3, destripe=False, destripe_iter=1):
     
     Z_gc = stmpy.tools.nsigma_global(Z, n=n_sigma_correction, M=5, repeat=100)
     Z_lc = stmpy.tools.nsigma_local(Z_gc, n=n_sigma_correction, N=4, M=5, repeat=50)
@@ -313,7 +335,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                              ls_robust=True,
                              ls_n_sigma=2.5,
                              ls_n_iter=3,
-                             destripe=True,
+                             destripe=False,
                              destripe_iter=1,
                              add_colorbar=True,
                              colorbar_range=None,
@@ -351,6 +373,14 @@ def add_corrections_and_plot(data, dos_map: bool = False,
     k_crop_n = int(0.5 * (n_pixels - k_kept_n))  # crop 10 nm in FFT
     # print(k_kept_n,k_crop_n)
     k_crop_n = 0 if k_crop_n < 0 else k_crop_n
+
+    # Scale bar lengths adapted to the displayed extent: round 1-2-5 values
+    # in real space, 1-2-2.5-5 in k-space; cropped FFT panels use the
+    # cropped extent so the bar stays ~1/4 of the visible width.
+    rs_bar = nice_scale_bar(scan_size)
+    k_bar_full = nice_scale_bar(FFT_scan_size, nice=(1, 2, 2.5, 5))
+    k_bar_crop = nice_scale_bar(FFT_scan_size * (n_pixels - 2 * k_crop_n) / n_pixels,
+                                nice=(1, 2, 2.5, 5))
     
     # Default topography color scale computed from the BACKGROUND only: bright
     # adatoms are detected (median + adatom_sigma * robust sigma) and excluded
@@ -411,25 +441,25 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                             rect = patches.Rectangle((cx - sx, cy - sy), 2*sx, 2*sy, linewidth=1, edgecolor='w', facecolor='none')
                             ax_topo[i,j].add_patch(rect)
                         ax_topo[i,j].set_axis_off()
-                        stmpy.image.add_scale_bar(5, scan_size, n_pixels, fs=12, ax=ax_topo[i,j])
+                        stmpy.image.add_scale_bar(rs_bar, scan_size, n_pixels, fs=12, ax=ax_topo[i,j])
                         if add_colorbar:
                             stmpy.image.add_colorbar(ax=ax_topo[i,j], label='Topography (m)', fs=8)
                         if add_label:
                             stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i,j], fs=8)
    
             plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[0,5], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                          scalebar = [1, FFT_scan_size, n_pixels])
+                          scalebar = [k_bar_crop, FFT_scan_size, n_pixels])
             plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[0,6], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                          scalebar = [1, FFT_scan_size, n_pixels])
+                          scalebar = [k_bar_full, FFT_scan_size, n_pixels])
             plot_FFT_data(data.FZ_BWD_ls, k_crop_n=k_crop_n, ax=ax_topo[1,5], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                          scalebar = [1, FFT_scan_size, n_pixels])
+                          scalebar = [k_bar_crop, FFT_scan_size, n_pixels])
             plot_FFT_data(data.FZ_BWD_ls, k_crop_n=0, ax=ax_topo[1,6], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                          scalebar = [1, FFT_scan_size, n_pixels])
+                          scalebar = [k_bar_full, FFT_scan_size, n_pixels])
             if sym is not None:
                 plot_FFT_data(data.FZ_ls_s, k_crop_n=k_crop_n, ax=ax_topo[0,7], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                              scalebar = [1, FFT_scan_size, n_pixels])
+                              scalebar = [k_bar_crop, FFT_scan_size, n_pixels])
                 plot_FFT_data(data.FZ_BWD_ls_s, k_crop_n=k_crop_n, ax=ax_topo[1,7], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                              scalebar = [1, FFT_scan_size, n_pixels])
+                              scalebar = [k_bar_crop, FFT_scan_size, n_pixels])
             
     else:
         if make_plots:
@@ -445,16 +475,16 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                 a.set_aspect('equal')
                 if i < 5:
                     a.set_axis_off()
-                    stmpy.image.add_scale_bar(5, scan_size, n_pixels, fs=12,  ax=a)
+                    stmpy.image.add_scale_bar(rs_bar, scan_size, n_pixels, fs=12,  ax=a)
                     if add_colorbar:
                             stmpy.image.add_colorbar(ax=ax_topo[i], label='Topography (m)', fs=8)
                     if add_label:
                             stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i], fs=8)
 
             plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[5], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                          scalebar = [1, FFT_scan_size, n_pixels])
+                          scalebar = [k_bar_crop, FFT_scan_size, n_pixels])
             plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[6], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                          scalebar = [1, FFT_scan_size, n_pixels])
+                          scalebar = [k_bar_full, FFT_scan_size, n_pixels])
 
     if make_plots:
         # fig_topo.tight_layout()
@@ -489,9 +519,9 @@ def add_corrections_and_plot(data, dos_map: bool = False,
             ax_dm[1].set_title('Global Corrected dI/dV at mean V')
             ax_dm[2].imshow(mean_lc, origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
             ax_dm[2].set_title('Local Corrected dI/dV at mean V')
-            for a in ax_dm: 
+            for a in ax_dm:
                 a.set_axis_off()
-                stmpy.image.add_scale_bar(5, scan_size, n_pixels, fs=12, ax=a)
+                stmpy.image.add_scale_bar(rs_bar, scan_size, n_pixels, fs=12, ax=a)
             fig_dm.tight_layout()
             figs['dos_mean'] = (fig_dm, ax_dm)
 
@@ -512,9 +542,9 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                 ax_ds[1].set_title(f'Global Corrected dI/dV at {en_label}')
                 ax_ds[2].imshow(data.LIY_lc[idx], origin='lower', cmap=stmpy.cm.Blues_r, interpolation='none')
                 ax_ds[2].set_title(f'Local Corrected dI/dV at {en_label}')
-                for a in ax_ds: 
+                for a in ax_ds:
                     a.set_axis_off()
-                    stmpy.image.add_scale_bar(5, scan_size, n_pixels, fs=12,  ax=a)
+                    stmpy.image.add_scale_bar(rs_bar, scan_size, n_pixels, fs=12,  ax=a)
                 fig_ds.tight_layout()
                 figs['dos_idx'] = (fig_ds, ax_ds)
 
@@ -1234,7 +1264,8 @@ def plot_rk_space(data, ens=None):
         ax.set_xlabel('x (nm)')
         ax.set_ylabel('y (nm)')
         # print(data.scan_info['scan_size'], data.scan_info['n_pixels'])
-        stmpy.image.add_scale_bar(5, data.scan_info['scan_size'], data.scan_info['n_pixels'], fs=12, pad=0.1, ax=ax)
+        stmpy.image.add_scale_bar(nice_scale_bar(data.scan_info['scan_size']),
+                                  data.scan_info['scan_size'], data.scan_info['n_pixels'], fs=12, pad=0.1, ax=ax)
 
 
 def plot_histogram(data, title='Histogram', xlabel='I (pA)', xlim=None):

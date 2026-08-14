@@ -619,7 +619,33 @@ def load_3ds(filePath):
 
 
 def load_sxm(filePath):
-    ''' Load Nanonis SXM files into python. '''
+    ''' Load Nanonis SXM files into python.
+
+    Returns:
+        self.header   - SXM header entries
+        self.channels - All recorded channels, keyed '<Name>_Fwd' / '<Name>_Bkd'
+        self.Z        - Topography, forward scan
+        self.Z_BWD    - Topography, backward scan (x-flipped to overlay Z)
+        self.I        - Current, forward scan
+        self.I_BWD    - Current, backward scan (x-flipped)
+        self.LIY      - LIY 1 omega, forward scan
+        self.LIY_BWD  - LIY 1 omega, backward scan (x-flipped)
+
+        Backward attributes are only created when the channel was recorded
+        in both directions; naming matches load_sm4 so downstream code
+        (e.g. hasattr(data, 'Z_BWD')) works for both file types.
+
+        Orientation: scans recorded top-down (header SCAN_DIR = 'down') are
+        flipped vertically at load time so every scan shares the physical
+        'up' orientation when plotted with origin='lower'. Scans with a
+        nonzero SCAN_ANGLE are normalized within their rotated frame only.
+
+    History:
+        2026-08-13  - ZM : Promote backward channels to Z_BWD/I_BWD/LIY_BWD
+                           attributes (x-flipped) to match load_sm4.
+        2026-08-13  - ZM : Flip 'down' scans vertically (using SCAN_DIR) so
+                           up and down scans load in the same orientation.
+    '''
     try:
         fileObj = open(filePath, 'rb')
     except:
@@ -683,11 +709,31 @@ def load_sxm(filePath):
         else:
             self.channels[channel['Name'] + channel['Direction']] = np.ndarray(
                     shape=shape, dtype='>f', buffer=fileObj.read(size))
-    try:
-        self.Z = self.channels['Z_Fwd']
-        self.I = self.channels['Current_Fwd']
-        self.LIY = self.channels['LIY_1_omega_Fwd']
-    except KeyError: print('WARNING:  Could not create standard attributes, look in channels instead.')
+    if self.header.get('scan_dir') == 'down':
+        # Rows are stored in acquisition order; a down scan acquires the top
+        # line first, so flip vertically so every scan shares the physical
+        # 'up' orientation when plotted with origin='lower'.
+        self.channels = {k: v[::-1, :] for k, v in self.channels.items()}
+
+    def _promote(attr, names):
+        # names: channel name variants in order of preference (cf. load_sm4)
+        for name in names:
+            fwd, bkd = name + '_Fwd', name + '_Bkd'
+            if fwd in self.channels:
+                setattr(self, attr, self.channels[fwd])
+                if bkd in self.channels:
+                    # Nanonis stores the backward pass with the fast axis
+                    # reversed; flip x so it overlays the forward scan.
+                    setattr(self, attr + '_BWD', self.channels[bkd][:, ::-1])
+                    print('{:} FWD and BWD found'.format(attr))
+                else:
+                    print('{:} only FWD found'.format(attr))
+                return
+        print('WARN: {:} channel not found'.format(attr))
+
+    _promote('Z', ['Z'])
+    _promote('I', ['Current'])
+    _promote('LIY', ['LIY_1_omega', 'LI_Demod_1_X'])
     fileObj.close()
 
     self.scan_info = {
