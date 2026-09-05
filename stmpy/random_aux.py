@@ -47,6 +47,98 @@ def nice_scale_bar(extent, frac=0.25, nice=(1, 2, 5)):
     return int(best) if float(best).is_integer() else best
 
 
+def _contrast_color(ax, region=(0.20, 0.42)):
+    ''''k' or 'w', whichever will read against the corner the scale bar sits in.
+
+    A white bar vanishes wherever the surface is bright, which on Blues_r is any
+    high-Z patch -- adatoms, an upper terrace. What matters is the *rendered*
+    colour, not the data, so the corner under the bar is pushed through the
+    image's own norm and colormap and its median luminance picks the bar colour.
+    Rec.709 luminance, thresholded at the midpoint.
+
+    Inputs:
+        region - Optional : (height, width) fractions of the panel sampled from
+                 the lower-right corner, where add_scale_bar places the bar and
+                 its label. The panels are drawn origin='lower', so that corner
+                 is the START of the array rows.
+    '''
+    im = ax.images[-1] if ax.images else None
+    if im is None:
+        return 'w'
+    arr = np.asarray(im.get_array(), dtype=float)
+    h, w = arr.shape[0], arr.shape[1]
+    fh, fw = region
+    patch = arr[:max(1, int(h * fh)), int(w * (1 - fw)):]
+    vals = patch[np.isfinite(patch)]
+    if vals.size == 0:
+        return 'w'
+    rgba = np.asarray(im.cmap(im.norm(vals)), dtype=float)
+    lum = 0.2126*rgba[..., 0] + 0.7152*rgba[..., 1] + 0.0722*rgba[..., 2]
+    return 'k' if np.median(lum) > 0.5 else 'w'
+
+
+def _add_scale_bar(ax, length, imgsize, imgpixels, height_frac=1.5e-2, disp_n=None,
+                   color='auto', **kw):
+    '''add_scale_bar with a thickness that is a true fraction of the drawn panel.
+
+    add_scale_bar sets the bar thickness to int(imgpixels * barheight) in data
+    units, which breaks two ways. A cropped panel handed the full-frame
+    imgpixels gets a bar measured against the wrong size -- too thick relative to
+    what is actually drawn. And any product under 1 truncates to zero and the bar
+    disappears: the FFT panels passed barheight=1e-3 with imgpixels=256, so
+    int(0.256) == 0 and the bar came out a hairline.
+
+    Rescaling imgsize/imgpixels to the displayed array leaves the length
+    calibration (imgsize/imgpixels per pixel) untouched while making height_frac
+    a fraction of the panel on screen; the +0.5 survives add_scale_bar's int()
+    and the max() keeps the bar at least one pixel tall.
+
+    Inputs:
+        length, imgsize, imgpixels - as add_scale_bar, for the FULL frame.
+        height_frac - Optional : Bar thickness as a fraction of panel height.
+        disp_n      - Optional : Side length of the array actually drawn, when
+                      the panel shows a cropped view (FFT). Defaults to imgpixels.
+    '''
+    disp_n = imgpixels if disp_n is None else disp_n
+    h_px = max(1, int(round(disp_n * height_frac)))
+    if color == 'auto':
+        color = _contrast_color(ax)
+    stmpy.image.add_scale_bar(length, imgsize * disp_n / imgpixels, disp_n,
+                              barheight=(h_px + 0.5) / disp_n, ax=ax, color=color, **kw)
+
+
+def _shrunk_colorbar(ax, label='', fs=8, shrink=0.7, fraction=0.05, pad=0.04):
+    '''Horizontal colorbar under `ax`, drawn at `shrink` of the panel width.
+
+    A bar spanning the full panel puts its end labels hard against the panel
+    edge, where they collide with the neighbouring panel's colorbar. Shrinking
+    the bar leaves them room. `aspect` scales with `shrink` so the bar keeps the
+    thickness a full-width one would have had. Unlike stmpy.image.add_colorbar
+    (which hangs the cax off an axes_grid divider) this goes through
+    fig.colorbar, so constrained_layout accounts for it.
+    '''
+    im = ax.images[-1] if ax.images else (ax.collections[-1] if ax.collections else None)
+    cbar = ax.get_figure().colorbar(im, ax=ax, orientation='horizontal', location='bottom',
+                                    shrink=shrink, fraction=fraction, pad=pad,
+                                    aspect=20 * shrink)
+    cbar.set_label(label, fontsize=fs)
+    cbar.ax.tick_params(labelsize=fs)
+    return cbar
+
+
+def _reserve_cbar_space(ax, shrink=0.7, fraction=0.05, pad=0.04):
+    '''Give up the same strip of `ax` a colorbar would take, but draw nothing.
+
+    A panel without a colorbar keeps that space and ends up taller than its
+    neighbours that have one, so a row of mixed panels sits at mixed heights.
+    Reserving the strip invisibly keeps every panel the same size and every
+    title on the same line.
+    '''
+    cbar = _shrunk_colorbar(ax, label='', shrink=shrink, fraction=fraction, pad=pad)
+    cbar.ax.set_visible(False)
+    return cbar
+
+
 def plot_FFT_data(data,
                   k_crop_n = 0, 
                   k_box_center=None,  # e.g. (x, y) to center a box
@@ -58,6 +150,9 @@ def plot_FFT_data(data,
                   prc=None,                  # e.g. (1, 99) to use percentiles instead of std
                   ax=None,
                   add_colorbar=False,
+                  cbar_shrink=None,   # None -> full-width divider colorbar (old behaviour)
+                  scalebar_height=1.5e-2,   # matches the real-space bars
+                  scalebar_color='black',   # or 'auto' -> pick against the corner
                   make_circle=None,
                   savename=None,
                   scalebar=None,
@@ -116,10 +211,14 @@ def plot_FFT_data(data,
 
     ax.imshow(arr, origin='lower', cmap=cmap, clim=clim, interpolation='none')
     if add_colorbar:
-        
-        stmpy.image.add_colorbar(ax=ax, loc=0, label='FFT Amplitude', fs=8)
+        if cbar_shrink is None:
+            stmpy.image.add_colorbar(ax=ax, loc=0, label='FFT Amplitude', fs=8)
+        else:
+            _shrunk_colorbar(ax, label='FFT Amplitude', fs=8, shrink=cbar_shrink)
     if scalebar is not None:
-        stmpy.image.add_scale_bar(scalebar[0], scalebar[1], scalebar[2], ax=ax, fs=12, unit='Å^{-1}', color='black', barheight=1e-3)
+        _add_scale_bar(ax, scalebar[0], scalebar[1], scalebar[2],
+                       height_frac=scalebar_height, disp_n=arr.shape[0],
+                       fs=12, unit='Å^{-1}', color=scalebar_color)
     # ax.set_axis_off()
     ax.set_xticks([])
     ax.set_yticks([])
@@ -257,10 +356,136 @@ def _background_clim(img, pct=(1, 99), exclude_adatoms=True, adatom_sigma=3.0):
     return np.nanpercentile(flat, list(pct))
 
 
+def _pm_from_zero(Z, clim=None, clim_pm=None):
+    '''Topography in picometres, measured from the bottom of the color scale.
+
+    Absolute Z (metres, referenced to wherever the z-piezo happened to sit) is
+    not physically meaningful on its own -- only the corrugation is. This shifts
+    the image so the bottom of the color scale sits at 0 and converts to pm, so
+    the colorbar reads 0 -> corrugation and can be dropped straight into a talk.
+
+    Inputs:
+        Z       - Topography in metres.
+        clim    - Optional : (vmin, vmax) in metres, as returned by
+                  _background_clim. The shift reference is vmin, so FWD and BWD
+                  panels sharing a clim stay directly comparable. When None the
+                  image's own minimum is used and the scale spans min -> max.
+        clim_pm - Optional : (vmin, vmax) in pm on the zero-based scale, i.e. the
+                  numbers you read off the colorbar. Sets the colour limits
+                  without moving the zero reference, so asking for (0, 100) on a
+                  panel that came out 0 -> 288 pm keeps the same zero and just
+                  raises the contrast.
+
+    Returns:
+        (Z_pm, clim_pm) - Shifted image in pm, and its colour limits in pm.
+    '''
+    Z = np.asarray(Z, dtype=float)
+    if clim is None:
+        lo, hi = np.nanmin(Z), np.nanmax(Z)
+    else:
+        lo, hi = clim[0], clim[1]
+    Z_pm = (Z - lo) * 1e12
+    if clim_pm is not None:
+        return Z_pm, (float(clim_pm[0]), float(clim_pm[1]))
+    return Z_pm, (0.0, (hi - lo) * 1e12)
+
+
+def _check_pm_range(name, rng):
+    '''Validate a colour range given in pm, and catch one left in metres.
+
+    These ranges used to be absolute metres; they are now pm on the zero-based
+    scale. A leftover value like 2e-13 would silently collapse the colour scale
+    to nothing, so say so instead.
+    '''
+    if rng is None:
+        return None
+    lo, hi = float(rng[0]), float(rng[1])
+    if hi <= lo:
+        raise ValueError(f'{name} must be (vmin, vmax) with vmax > vmin, got {rng}')
+    if hi - lo < 1e-3:
+        raise ValueError(
+            f'{name} is given in pm on the zero-based colorbar scale, not in '
+            f'metres: {rng} spans only {hi - lo:g} pm. If these are metres, '
+            f'multiply by 1e12.')
+    return (lo, hi)
+
+
+def _flank_label_colorbar(ax, unit='pm', scale=1.0, fs=8, shrink=0.7,
+                          fraction=0.05, pad=0.04):
+    '''Colorbar with no ticks, its range written to the left and right of the bar.
+
+    Ticks and an axis label are three pieces of furniture to say two numbers. The
+    bar is left bare and the bottom and top of the range are set beside it, so a
+    panel reads `0 pm [====] 251 pm`. The unit rides on the values: on a
+    topograph panel, "Topography" is not news to the reader.
+
+    Inputs:
+        unit    - Optional : Unit string appended to both values ('' for none).
+        scale   - Optional : Factor from data units to the displayed unit, e.g.
+                  1e12 to label an FFT amplitude held in metres as pm. The
+                  topography panels are already in pm, so they use 1.0.
+    '''
+    cbar = _shrunk_colorbar(ax, label='', fs=fs, shrink=shrink,
+                            fraction=fraction, pad=pad)
+    lo, hi = (v * scale for v in cbar.mappable.get_clim())
+    cbar.set_ticks([])
+    span = abs(hi - lo)
+    fmt = '{:.0f}' if span >= 10 else ('{:.1f}' if span >= 1 else '{:.2f}')
+    suffix = f' {unit}' if unit else ''
+    for x, v, ha in [(-0.02, lo, 'right'), (1.02, hi, 'left')]:
+        cbar.ax.text(x, 0.5, fmt.format(v) + suffix, transform=cbar.ax.transAxes,
+                     ha=ha, va='center', fontsize=fs)
+    return cbar
+
+
+def _check_savepath(path, argname='savepath'):
+    '''Fail readably when a save directory does not exist.
+
+    A path drag-dropped from Terminal arrives shell-escaped -- 'Mobile\\ Documents',
+    'com\\~apple\\~CloudDocs'. Python keeps those backslashes as literal characters,
+    so the directory never matches and savefig raises a bare Errno 2 that does
+    not hint at the cause. This does.
+    '''
+    if Path(str(path)).is_dir():
+        return
+    msg = f'{argname} does not exist: {path!r}'
+    if '\\' in str(path):
+        msg += ('\n  The path contains backslashes, so it looks shell-escaped. In '
+                'Python those backslashes are literal characters -- pass the plain '
+                'path instead, e.g.\n  '
+                "'/Users/zeyu/Library/Mobile Documents/com~apple~CloudDocs/Downloads'")
+    raise FileNotFoundError(msg)
+
+
+def _apply_font_family(figs, family):
+    '''Restyle every text object in `figs` to `family` (e.g. 'Arial').
+
+    A Text grabs its FontProperties from rcParams the moment it is created, so
+    setting the rcParam after the figure is built does nothing -- the family has
+    to be pushed onto the objects themselves. Math text is the exception: it is
+    laid out at draw time from the mathtext.* rcParams, which is why the save
+    block sets those too.
+    '''
+    if family is None:
+        return
+    for entry in figs.values():
+        fig = entry[0] if isinstance(entry, tuple) else entry
+        for text in fig.findobj(plt.Text):
+            text.set_fontfamily(family)
+
+
+def _mathtext_rc(family):
+    '''rcParams that point mathtext at `family` instead of the DejaVu default.'''
+    if family is None:
+        return {}
+    return {'mathtext.fontset': 'custom', 'mathtext.rm': family,
+            'mathtext.it': f'{family}:italic', 'mathtext.bf': f'{family}:bold'}
+
+
 def _process_pipeline(Z, window_type='hanning', ls_order=2, ps_order=2, n_sigma_correction=5,
                       ls_robust=True, ls_n_sigma=2.5, ls_n_iter=3, destripe=False, destripe_iter=1):
     
-    Z_gc = stmpy.tools.nsigma_global(Z, n=n_sigma_correction, M=5, repeat=100)
+    Z_gc = stmpy.tools.nsigma_global(Z, n=n_sigma_correction, M=5, repeat=50)
     Z_lc = stmpy.tools.nsigma_local(Z_gc, n=n_sigma_correction, N=4, M=5, repeat=50)
 
     if ls_robust:
@@ -274,7 +499,7 @@ def _process_pipeline(Z, window_type='hanning', ls_order=2, ps_order=2, n_sigma_
     FZ_ps = stmpy.tools.fft(Z_ps, zeroDC=True, window=window_type, units='amplitude', output='absolute')
     return Z_gc, Z_lc, Z_ls, FZ_ls, Z_ps, FZ_ps
 
-def _process_pipeline_LIY(data,smooth_window=10, window_type='hanning', repeat=2, n_sigma_correction=3):
+def _process_pipeline_LIY(data,smooth_window=10, window_type='hanning', repeat=2, n_sigma_correction=5):
     data.LIY_smoothed = smooth_LIY(data.LIY, window=smooth_window, axis=0, mode='reflect')
     data.LIY_gc = stmpy.tools.nsigma_global(data.LIY_smoothed, n=n_sigma_correction, M=3, repeat=repeat)
     data.LIY_lc = stmpy.tools.nsigma_local(data.LIY_gc, n=n_sigma_correction, N=4, M=3, repeat=repeat)
@@ -324,26 +549,32 @@ def normalize_LIY_by_area(en, LIY, E1, E2, eps=1e-24, window_type='hanning',retu
     else:
         return LIY_norm, FLIY_norm
     
-def add_corrections_and_plot(data, dos_map: bool = False, 
+def _add_corrections_and_plot_impl(data, dos_map: bool = False, 
                              r_crop_n=0,
                              r_box_center=None,
                              r_box_size=None,
                              idx= None, 
                              ls_order=2,
                              ps_order=2,
-                             n_sigma_correction=3,
+                             n_sigma_correction=5,
                              ls_robust=True,
                              ls_n_sigma=2.5,
                              ls_n_iter=3,
                              destripe=False,
                              destripe_iter=1,
                              add_colorbar=True,
-                             colorbar_range=None,
-                             colorbar_range_FFT=None,
-                             colorbar_range_ps=None,
-                             exclude_adatoms=True,
+                             add_colorbar_FFT=True,
+                             font_family='Arial',
+                             cbar_shrink=0.7,
+                             scalebar_height=1.5e-2,
+                             scalebar_color='auto',   # 'auto' | 'w' | 'k' | any colour
+                             colorbar_range=None,      # pm on the zero-based scale (line subtracted)
+                             colorbar_range_FFT=None,  # pm of FFT amplitude
+                             colorbar_range_ps=None,   # pm on the zero-based scale (plane subtracted)
+                             colorbar_range_raw=None,  # pm on the zero-based scale (raw Z)
+                             exclude_adatoms=False,
                              adatom_sigma=3.0,
-                             k_kept_n_ratio = 6.3,
+                             k_kept_n_ratio = 256/30,
                              add_label=True,
                              sym=None,
                              savepath=None, 
@@ -368,6 +599,7 @@ def add_corrections_and_plot(data, dos_map: bool = False,
     # --- Topography corrections ---
     data.Z_gc, data.Z_lc, data.Z_ls, data.FZ_ls, data.Z_ps, data.FZ_ps = _process_pipeline(data.Z, ls_order=ls_order, ps_order=ps_order, n_sigma_correction=n_sigma_correction, ls_robust=ls_robust, ls_n_sigma=ls_n_sigma, ls_n_iter=ls_n_iter, destripe=destripe, destripe_iter=destripe_iter)
     data.FZ_ls = stmpy.tools.fft(data.Z_ls, zeroDC=True, window='hanning', units='amplitude', output='absolute')
+    data.FZ = stmpy.tools.fft(data.Z, zeroDC=True, window='hanning', units='amplitude', output='absolute')
     
     k_kept_n = k_kept_n_ratio * scan_size
     k_crop_n = int(0.5 * (n_pixels - k_kept_n))  # crop 10 nm in FFT
@@ -388,103 +620,162 @@ def add_corrections_and_plot(data, dos_map: bool = False,
     # underlying corrugation -- the adatoms simply saturate at the top of the
     # scale. Set exclude_adatoms=False to include them (full-range scaling).
     # Shared by the FWD and BWD panels for direct comparison.
-    if colorbar_range is None:
-        colorbar_range = _background_clim(data.Z_ls, exclude_adatoms=exclude_adatoms,
-                                          adatom_sigma=adatom_sigma)
-    if colorbar_range_ps is None:
-        colorbar_range_ps = _background_clim(data.Z_ps, exclude_adatoms=exclude_adatoms,
-                                             adatom_sigma=adatom_sigma)
+    # The automatic limits (metres) are always computed: their lower bound is the
+    # zero reference of the displayed pm scale, which a user-supplied pm range
+    # must not move -- otherwise "0 pm" would mean something different from one
+    # call to the next.
+    auto_ls = _background_clim(data.Z_ls, exclude_adatoms=exclude_adatoms,
+                               adatom_sigma=adatom_sigma)
+    auto_ps = _background_clim(data.Z_ps, exclude_adatoms=exclude_adatoms,
+                               adatom_sigma=adatom_sigma)
+    colorbar_range     = _check_pm_range('colorbar_range', colorbar_range)
+    colorbar_range_ps  = _check_pm_range('colorbar_range_ps', colorbar_range_ps)
+    colorbar_range_raw = _check_pm_range('colorbar_range_raw', colorbar_range_raw)
+    colorbar_range_FFT = _check_pm_range('colorbar_range_FFT', colorbar_range_FFT)
+    # plot_FFT_data works in the data's own units, so hand it metres
+    clim_FFT_m = (None if colorbar_range_FFT is None
+                  else tuple(v * 1e-12 for v in colorbar_range_FFT))
 
     if hasattr(data, "Z_BWD"):
         data.Z_BWD = data.Z_BWD * z_calibration_factor 
         data.Z_BWD_gc, data.Z_BWD_lc, data.Z_BWD_ls, data.FZ_BWD_ls, data.Z_BWD_ps, data.FZ_BWD_ps = _process_pipeline(data.Z_BWD, ls_order=ls_order, ps_order=ps_order, n_sigma_correction=n_sigma_correction, ls_robust=ls_robust, ls_n_sigma=ls_n_sigma, ls_n_iter=ls_n_iter, destripe=destripe, destripe_iter=destripe_iter)
         data.FZ_BWD_ls = stmpy.tools.fft(data.Z_BWD_ls, zeroDC=True, window='hanning', units='amplitude', output='absolute')
+        data.FZ_BWD = stmpy.tools.fft(data.Z_BWD, zeroDC=True, window='hanning', units='amplitude', output='absolute')
         if make_plots:
+            # Seven columns: each real-space panel followed by its own FFT at the
+            # same cropped k range, then the raw FFT again over the full k range
+            # as a reference for how far the cropped view reaches.
+            #   raw | FFT(raw) | plane sub | FFT(ps) | line sub | FFT(ls) | FFT(raw), full k
+            # Row 0 = forward trace, row 1 = backward trace.
+            fig_topo, ax_topo = plt.subplots(2, 7, figsize=(23, 10), constrained_layout=True)
             if sym is not None:
-                fig_topo, ax_topo = plt.subplots(2, 8, figsize=(26, 10), constrained_layout=True)
                 data.FZ_ls_s = dfc.sym(data.FZ_ls, sym)
                 data.FZ_BWD_ls_s = dfc.sym(data.FZ_BWD_ls, sym)
-            else:
-                fig_topo, ax_topo = plt.subplots(2, 7, figsize=(23, 10))
+            ax_topo_ps_FWD = ax_topo[0,2]
             ax_topo_ls_FWD = ax_topo[0,4]
-            ax_topo_ps_FWD = ax_topo[0,3]
+            ax_topo_ps_BWD = ax_topo[1,2]
             ax_topo_ls_BWD = ax_topo[1,4]
-            ax_topo_ps_BWD = ax_topo[1,3]
 
-            ax_topo[0,0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,0].set_title('Raw Z')
-            ax_topo[0,1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,1].set_title('Global Corrected Z')
-            ax_topo[0,2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0,2].set_title('Local Corrected Z')
-            ax_topo_ls_FWD.imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range, interpolation='none'); ax_topo_ls_FWD.set_title(f'Line Subtracted Z (order={ls_order})')
-            ax_topo_ps_FWD.imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps, interpolation='none'); ax_topo_ps_FWD.set_title(f'Plane Subtracted Z (order={ps_order})')
-        
-            ax_topo[1,0].imshow(data.Z_BWD,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,0].set_title('Raw Z BWD')
-            ax_topo[1,1].imshow(data.Z_BWD_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,1].set_title('Global Corrected Z BWD')
-            ax_topo[1,2].imshow(data.Z_BWD_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1,2].set_title('Local Corrected Z BWD')
-            ax_topo_ls_BWD.imshow(data.Z_BWD_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range, interpolation='none'); ax_topo_ls_BWD.set_title(f'Line Subtracted Z BWD (order={ls_order})')
-            ax_topo_ps_BWD.imshow(data.Z_BWD_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps, interpolation='none'); ax_topo_ps_BWD.set_title(f'Plane Subtracted Z BWD (order={ps_order})')
+            # Heights are shown as corrugation in pm from the bottom of the color
+            # scale (see _pm_from_zero), not as absolute z-piezo position. FWD and
+            # BWD share a reference wherever they share a clim.
+            Z_pm,        clim_raw     = _pm_from_zero(data.Z, None, colorbar_range_raw)
+            Z_ps_pm,     clim_ps_pm   = _pm_from_zero(data.Z_ps, auto_ps, colorbar_range_ps)
+            Z_ls_pm,     clim_ls_pm   = _pm_from_zero(data.Z_ls, auto_ls, colorbar_range)
+            Z_BWD_pm,    clim_raw_BWD = _pm_from_zero(data.Z_BWD, None, colorbar_range_raw)
+            Z_BWD_ps_pm, _            = _pm_from_zero(data.Z_BWD_ps, auto_ps, colorbar_range_ps)
+            Z_BWD_ls_pm, _            = _pm_from_zero(data.Z_BWD_ls, auto_ls, colorbar_range)
+
+            ax_topo[0,0].imshow(Z_pm, cmap=stmpy.cm.Blues_r, origin='lower', clim=clim_raw, interpolation='none'); ax_topo[0,0].set_title('Raw Z')
+            ax_topo_ps_FWD.imshow(Z_ps_pm, cmap=stmpy.cm.Blues_r, origin='lower', clim=clim_ps_pm, interpolation='none'); ax_topo_ps_FWD.set_title(f'Plane Subtracted Z (order={ps_order})')
+            ax_topo_ls_FWD.imshow(Z_ls_pm, cmap=stmpy.cm.Blues_r, origin='lower', clim=clim_ls_pm, interpolation='none'); ax_topo_ls_FWD.set_title(f'Line Subtracted Z (order={ls_order})')
+
+            ax_topo[1,0].imshow(Z_BWD_pm, cmap=stmpy.cm.Blues_r, origin='lower', clim=clim_raw_BWD, interpolation='none'); ax_topo[1,0].set_title('Raw Z BWD')
+            ax_topo_ps_BWD.imshow(Z_BWD_ps_pm, cmap=stmpy.cm.Blues_r, origin='lower', clim=clim_ps_pm, interpolation='none'); ax_topo_ps_BWD.set_title(f'Plane Subtracted Z BWD (order={ps_order})')
+            ax_topo_ls_BWD.imshow(Z_BWD_ls_pm, cmap=stmpy.cm.Blues_r, origin='lower', clim=clim_ls_pm, interpolation='none'); ax_topo_ls_BWD.set_title(f'Line Subtracted Z BWD (order={ls_order})')
 
             for i in range(2):
                 for j in range(7):
                     ax_topo[i,j].set_xlabel('')
                     ax_topo[i,j].set_ylabel('')
                     # aspect ratio
-                    ax_topo[i,j].set_aspect('equal')    
-                        
-                    if j < 5:
+                    ax_topo[i,j].set_aspect('equal')
+
+                    if j in (0, 2, 4):      # real-space columns
                         if r_crop_n > 0:
                             # make a white dashed square to indicate cropped region
                             h, w = data.Z.shape
                             rect = patches.Rectangle((r_crop_n, r_crop_n), w - 2*r_crop_n, h - 2*r_crop_n, linewidth=1, edgecolor='w', facecolor='none')
+                            ax_topo[i,j].add_patch(rect)
                         elif r_box_center is not None and r_box_size is not None:
                             cx, cy = r_box_center
                             sx, sy = np.array(r_box_size) / 2
                             rect = patches.Rectangle((cx - sx, cy - sy), 2*sx, 2*sy, linewidth=1, edgecolor='w', facecolor='none')
                             ax_topo[i,j].add_patch(rect)
-                        ax_topo[i,j].set_axis_off()
-                        stmpy.image.add_scale_bar(rs_bar, scan_size, n_pixels, fs=12, ax=ax_topo[i,j])
+                        # keep the spines so the topo panels carry the same frame
+                        # the FFT panels get from plot_FFT_data; drop only the ticks
+                        ax_topo[i,j].set_xticks([])
+                        ax_topo[i,j].set_yticks([])
+                        _add_scale_bar(ax_topo[i,j], rs_bar, scan_size, n_pixels, height_frac=scalebar_height,
+                                       color=scalebar_color, fs=12)
                         if add_colorbar:
-                            stmpy.image.add_colorbar(ax=ax_topo[i,j], label='Topography (m)', fs=8)
+                            _flank_label_colorbar(ax_topo[i,j], unit='pm', fs=8, shrink=cbar_shrink)
                         if add_label:
                             stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i,j], fs=8)
-   
-            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[0,5], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                          scalebar = [k_bar_crop, FFT_scan_size, n_pixels])
-            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[0,6], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                          scalebar = [k_bar_full, FFT_scan_size, n_pixels])
-            plot_FFT_data(data.FZ_BWD_ls, k_crop_n=k_crop_n, ax=ax_topo[1,5], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                          scalebar = [k_bar_crop, FFT_scan_size, n_pixels])
-            plot_FFT_data(data.FZ_BWD_ls, k_crop_n=0, ax=ax_topo[1,6], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                          scalebar = [k_bar_full, FFT_scan_size, n_pixels])
-            if sym is not None:
-                plot_FFT_data(data.FZ_ls_s, k_crop_n=k_crop_n, ax=ax_topo[0,7], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                              scalebar = [k_bar_crop, FFT_scan_size, n_pixels])
-                plot_FFT_data(data.FZ_BWD_ls_s, k_crop_n=k_crop_n, ax=ax_topo[1,7], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                              scalebar = [k_bar_crop, FFT_scan_size, n_pixels])
+
+            # FFT columns. The line-subtracted FFT is the symmetrized one when sym
+            # is given -- that is the panel sym was always applied to.
+            FZ_ls_shown     = data.FZ_ls_s     if sym is not None else data.FZ_ls
+            FZ_BWD_ls_shown = data.FZ_BWD_ls_s if sym is not None else data.FZ_BWD_ls
+            # Columns 1/3/5 share the cropped k range so the three transforms are
+            # directly comparable; column 6 repeats the raw one over the full k
+            # range, which is where the cropped extent can be judged.
+            for row, (F_raw, F_ps, F_ls) in enumerate([(data.FZ, data.FZ_ps, FZ_ls_shown),
+                                                       (data.FZ_BWD, data.FZ_BWD_ps, FZ_BWD_ls_shown)]):
+                for col, F, crop, bar in zip([1, 3, 5, 6], [F_raw, F_ps, F_ls, F_raw],
+                                             [k_crop_n, k_crop_n, k_crop_n, 0],
+                                             [k_bar_crop, k_bar_crop, k_bar_crop, k_bar_full]):
+                    plot_FFT_data(F, k_crop_n=crop, ax=ax_topo[row,col], add_colorbar=False,
+                                  clim=clim_FFT_m, scalebar=[bar, FFT_scan_size, n_pixels],
+                                  scalebar_height=scalebar_height,
+                              scalebar_color=scalebar_color)
+                    if add_colorbar_FFT:
+                        _flank_label_colorbar(ax_topo[row,col], unit='pm', scale=1e12,
+                                              fs=8, shrink=cbar_shrink)
+                    elif add_colorbar:
+                        _reserve_cbar_space(ax_topo[row,col], shrink=cbar_shrink)
+            sym_tag = f' ({sym} sym)' if sym is not None else ''
+            for row, tag in [(0, ''), (1, ' BWD')]:
+                ax_topo[row,1].set_title(f'FFT of Raw Z{tag}')
+                ax_topo[row,3].set_title(f'FFT of Plane Subtracted Z{tag}')
+                ax_topo[row,5].set_title(f'FFT of Line Subtracted Z{tag}' + sym_tag)
+                ax_topo[row,6].set_title(f'FFT of Raw Z{tag} (full k)')
             
     else:
         if make_plots:
-            fig_topo, ax_topo = plt.subplots(1, 7, figsize=(23, 5))
-            ax_topo[0].imshow(data.Z,     cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[0].set_title('Raw Z')
-            ax_topo[1].imshow(data.Z_gc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[1].set_title('Global Corrected Z')
-            ax_topo[2].imshow(data.Z_lc,  cmap=stmpy.cm.Blues_r, origin='lower', interpolation='none'); ax_topo[2].set_title('Local Corrected Z')
-            ax_topo[3].imshow(data.Z_ls,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range, interpolation='none'); ax_topo[3].set_title('Line Subtracted Z')
-            ax_topo[4].imshow(data.Z_ps,  cmap=stmpy.cm.Blues_r, origin='lower', clim=colorbar_range_ps, interpolation='none'); ax_topo[4].set_title('Plane Subtracted Z')
-            for i, a in enumerate(ax_topo): 
+            # Same seven columns as the FWD/BWD case, single row.
+            fig_topo, ax_topo = plt.subplots(1, 7, figsize=(23, 5), constrained_layout=True)
+            if sym is not None:
+                data.FZ_ls_s = dfc.sym(data.FZ_ls, sym)
+            Z_pm,    clim_raw   = _pm_from_zero(data.Z, None, colorbar_range_raw)
+            Z_ps_pm, clim_ps_pm = _pm_from_zero(data.Z_ps, auto_ps, colorbar_range_ps)
+            Z_ls_pm, clim_ls_pm = _pm_from_zero(data.Z_ls, auto_ls, colorbar_range)
+            ax_topo[0].imshow(Z_pm,    cmap=stmpy.cm.Blues_r, origin='lower', clim=clim_raw,   interpolation='none'); ax_topo[0].set_title('Raw Z')
+            ax_topo[2].imshow(Z_ps_pm, cmap=stmpy.cm.Blues_r, origin='lower', clim=clim_ps_pm, interpolation='none'); ax_topo[2].set_title(f'Plane Subtracted Z (order={ps_order})')
+            ax_topo[4].imshow(Z_ls_pm, cmap=stmpy.cm.Blues_r, origin='lower', clim=clim_ls_pm, interpolation='none'); ax_topo[4].set_title(f'Line Subtracted Z (order={ls_order})')
+            for i, a in enumerate(ax_topo):
                 a.set_xlabel('')
                 a.set_ylabel('')
                 a.set_aspect('equal')
-                if i < 5:
-                    a.set_axis_off()
-                    stmpy.image.add_scale_bar(rs_bar, scan_size, n_pixels, fs=12,  ax=a)
+                if i in (0, 2, 4):      # real-space columns
+                    a.set_xticks([])        # frame kept, to match the FFT panels
+                    a.set_yticks([])
+                    _add_scale_bar(a, rs_bar, scan_size, n_pixels, height_frac=scalebar_height,
+                                   color=scalebar_color, fs=12)
                     if add_colorbar:
-                            stmpy.image.add_colorbar(ax=ax_topo[i], label='Topography (m)', fs=8)
+                            _flank_label_colorbar(ax_topo[i], unit='pm', fs=8, shrink=cbar_shrink)
                     if add_label:
                             stmpy.image.add_label(f'{set_voltage:.2f}V {np.abs(set_current):.0f}pA', ax=ax_topo[i], fs=8)
 
-            plot_FFT_data(data.FZ_ls, k_crop_n=k_crop_n, ax=ax_topo[5], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                          scalebar = [k_bar_crop, FFT_scan_size, n_pixels])
-            plot_FFT_data(data.FZ_ls, k_crop_n=0, ax=ax_topo[6], add_colorbar=add_colorbar, clim=colorbar_range_FFT,
-                          scalebar = [k_bar_full, FFT_scan_size, n_pixels])
+            FZ_ls_shown = data.FZ_ls_s if sym is not None else data.FZ_ls
+            # 1/3/5 at the cropped k range; 6 repeats the raw FFT over full k
+            for col, F, crop, bar in zip([1, 3, 5, 6],
+                                         [data.FZ, data.FZ_ps, FZ_ls_shown, data.FZ],
+                                         [k_crop_n, k_crop_n, k_crop_n, 0],
+                                         [k_bar_crop, k_bar_crop, k_bar_crop, k_bar_full]):
+                plot_FFT_data(F, k_crop_n=crop, ax=ax_topo[col], add_colorbar=False,
+                              clim=clim_FFT_m, scalebar=[bar, FFT_scan_size, n_pixels],
+                              scalebar_height=scalebar_height,
+                              scalebar_color=scalebar_color)
+                if add_colorbar_FFT:
+                    _flank_label_colorbar(ax_topo[col], unit='pm', scale=1e12,
+                                          fs=8, shrink=cbar_shrink)
+                elif add_colorbar:
+                    _reserve_cbar_space(ax_topo[col], shrink=cbar_shrink)
+            ax_topo[1].set_title('FFT of Raw Z')
+            ax_topo[3].set_title('FFT of Plane Subtracted Z')
+            ax_topo[5].set_title('FFT of Line Subtracted Z' + (f' ({sym} sym)' if sym is not None else ''))
+            ax_topo[6].set_title('FFT of Raw Z (full k)')
 
     if make_plots:
         # fig_topo.tight_layout()
@@ -544,15 +835,30 @@ def add_corrections_and_plot(data, dos_map: bool = False,
                 ax_ds[2].set_title(f'Local Corrected dI/dV at {en_label}')
                 for a in ax_ds:
                     a.set_axis_off()
-                    stmpy.image.add_scale_bar(rs_bar, scan_size, n_pixels, fs=12,  ax=a)
+                    _add_scale_bar(a, rs_bar, scan_size, n_pixels, height_frac=scalebar_height,
+                                   color=scalebar_color, fs=12)
                 fig_ds.tight_layout()
                 figs['dos_idx'] = (fig_ds, ax_ds)
 
+    _apply_font_family(figs, font_family)
+
     if savename is not None:
-        savename = data.info_str + "_" + savename.replace(".sm4", "") +  ".pdf"
-        fig_topo.savefig(savepath+'/'+savename)
-        if savepath2 is not None:
-            fig_topo.savefig(savepath2+'/'+savename)
+        if savepath is None:
+            raise ValueError('savename was given but savepath is None -- nowhere to save to.')
+        stem = savename.replace(".sm4", "")
+        if stem.lower().endswith(".pdf"):      # a savename already carrying the
+            stem = stem[:-4]                   # extension would give '...pdf.pdf'
+        savename = data.info_str + "_" + stem + ".pdf"
+        # fonttype 42 embeds TrueType instead of matplotlib's default Type 3.
+        # Type 3 glyphs arrive in Illustrator as paths, so titles and labels
+        # cannot be retyped; with 42 they stay live, selectable text.
+        with plt.rc_context({'pdf.fonttype': 42, 'ps.fonttype': 42, 'svg.fonttype': 'none',
+                             **_mathtext_rc(font_family)}):
+            for argname, path in [('savepath', savepath), ('savepath2', savepath2)]:
+                if path is None:
+                    continue
+                _check_savepath(path, argname)
+                fig_topo.savefig(os.path.join(str(path), savename))
         if not silent:
             print(f"Saved topo figure to {savepath+'/'+savename}")
 
@@ -564,6 +870,23 @@ def add_corrections_and_plot(data, dos_map: bool = False,
     if return_figs:
         return figs
     
+
+
+def add_corrections_and_plot(*args, font_family='Arial', **kwargs):
+    '''add_corrections_and_plot with `font_family` applied to math text as well.
+
+    Math text (the scale-bar labels are the only ones here) is laid out from the
+    mathtext.* rcParams at draw time, and the first draw happens in the
+    constrained_layout pass -- before savefig. Setting those rcParams around the
+    save is therefore too late and the labels come out in DejaVu while every
+    other string is Arial. Wrapping the whole call keeps the two consistent, and
+    rc_context puts the rcParams back afterwards instead of leaking them.
+
+    See _add_corrections_and_plot_impl for the full signature.
+    '''
+    with plt.rc_context(_mathtext_rc(font_family)):
+        return _add_corrections_and_plot_impl(*args, font_family=font_family, **kwargs)
+
 
 
 def cumulative_integral_zero_at_origin(x, y):
