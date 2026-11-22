@@ -1181,6 +1181,8 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=0, r=None,
             coords[i][0] += popt[1] - width
             coords[i][1] += popt[2] - width
 
+    center = np.array(np.shape(A)[::-1]) // 2   # k = 0 pixel; returned whether or not show=True
+
     # This part shows the Bragg peak positions
     if show:
         plt.figure(figsize=[4, 4])
@@ -1199,7 +1201,6 @@ def findBraggs(A, rspace=True, min_dist=5, thres=0.25, crop_n=0, r=None,
             plt.xlim(crop_n, width - crop_n)
             plt.ylim(crop_n, height - crop_n)  
             
-        center = np.array(np.shape(A)[::-1]) // 2
         print('The coordinates of the Bragg peaks are:')
         pprint(coords)
         print()
@@ -1479,10 +1480,12 @@ def phasemap(A, bp, sigma=10, method="lockin", return_amp=False, return_complex=
     t1 = np.arange(s1, dtype='float')
     t2 = np.arange(s2, dtype='float')
     x, y = np.meshgrid(t1, t2)
-    Q1 = 2*np.pi*np.array([(bp[0][0]-int((s1-1)/2))/s1,
-                           (bp[0][1]-int((s2-1)/2))/s2])
-    Q2 = 2*np.pi*np.array([(bp[1][0]-int((s1-1)/2))/s1,
-                           (bp[1][1]-int((s2-1)/2))/s2])
+    # k = 0 sits at pixel (s1//2, s2//2) after np.fft.fftshift, the same centre findBraggs uses.
+    # (int((s-1)/2) is one pixel too low for even sizes and adds a spurious phase ramp.)
+    Q1 = 2*np.pi*np.array([(bp[0][0]-s1//2)/s1,
+                           (bp[0][1]-s2//2)/s2])
+    Q2 = 2*np.pi*np.array([(bp[1][0]-s1//2)/s1,
+                           (bp[1][1]-s2//2)/s2])
     if method is "lockin":
         A1x = A * np.sin(Q1[0]*x+Q1[1]*y)
         A1y = A * np.cos(Q1[0]*x+Q1[1]*y)
@@ -2029,7 +2032,7 @@ def FTDCfilter(A, sigma1, sigma2):
     '''
     *_, s2, s1 = A.shape
     m1, m2 = np.arange(s1, dtype='float'), np.arange(s2, dtype='float')
-    c1, c2 = float((s1-1)/2), float((s2-1)/2)
+    c1, c2 = float(s1//2), float(s2//2)   # k = 0 pixel of np.fft.fftshift (even and odd sizes)
     # sigma1 = sigma
     # sigma2 = sigma * s1 / s2
     g = Gaussian2d(m1, m2, sigma1, sigma2, 0, c1, c2, 1)
